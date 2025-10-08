@@ -1,76 +1,69 @@
-import esa_snappy as snappy
 import numpy
 import cv2
 import matplotlib.pyplot as plt
+from esa_snappy import ProductIO, PixelPos
 
-
-product = snappy.ProductIO.readProduct("subset_1_of_mosaic_msk.dim")
-band=product.getBand("Sigma0_VH")
-w=band.getRasterWidth()
-h=band.getRasterHeight()
-
-data=numpy.zeros((h,w)) #h x w matrix of 0s.
-band.readPixels(0,0,w,h,data) 
-low, high = 0.0001516640332, 0.0486812710436 #min/max value provided by snap.
-
-clipped = numpy.clip(data, low, high) #sets all values to low as minimum and high as maximum.
-img = cv2.normalize(clipped, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
-binary = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY)[1]
-
-pre_contours = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[0]
-min_area = 5   #adjust depending on expected dot size, removes noise.
-contours=[]
-for c in pre_contours:
-    if cv2.contourArea(c) > min_area:
-        contours.append(c)
-
-
-def get_centroid(c):
-    moments = cv2.moments(c)  #dict of weighted pixel intensities
+def get_centroid(contour):
+    moments = cv2.moments(contour)  #dict of weighted pixel intensities
     if moments["m00"] > 0:
         return int(moments["m10"]/moments["m00"]), int(moments["m01"]/moments["m00"]) #credit geekforgeeks, returns average centre of mass of contours.
     return None
 
+def read_SAR_data(image_path,low,high,threshold_min,min_area):
+    product = ProductIO.readProduct(image_path)
+    band=product.getBand("Sigma0_VH")
+    w=band.getRasterWidth()
+    h=band.getRasterHeight()
+    data=numpy.zeros((h,w)) #h x w matrix of 0s.
+    band.readPixels(0,0,w,h,data) 
 
-centroids=[]
-for c in contours:
-    centroids.append(get_centroid(c))
+    clipped = numpy.clip(data, low, high) #sets all values to low as minimum and high as maximum.
+    img = cv2.normalize(clipped, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
+    binary = cv2.threshold(img, threshold_min, 255, cv2.THRESH_BINARY)[1]
 
-merged_contours = []
-skip = set()
-for i,contour in enumerate(contours):
-    if i not in skip:
-        cx1,cy1=centroids[i]
-        same_dot=[contour]
-        for j,contour2 in enumerate(contours): #check for every dot to see if it is within dist pixels from eachother.
-            if not (j<=i or j in skip):
-                cx2, cy2 = centroids[j]
-                dist = numpy.hypot(cx1-cx2, cy1-cy2)
-                if dist < 50: #merge threshold in pixels.
-                    same_dot.append(contour2)
-                    skip.add(j)
-        merged=numpy.vstack(same_dot) #must be a numpy array for cv.
-        merged_contours.append(merged)
-        
-print("Merged detections:", len(merged_contours))
+    pre_contours = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[0]
+    contours=[]
+    for c in pre_contours:
+        if cv2.contourArea(c) > min_area:
+            contours.append(c)
 
-coords=[[]]
-output = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
-for c in merged_contours:
-    min_enclosing_circle=cv2.minEnclosingCircle(c)
-    (x, y) = min_enclosing_circle[0]
-    coords.append([x,y])
-    radius = min_enclosing_circle[1]
-    center = (int(x), int(y))
-    radius = int(radius*20)
-    cv2.circle(output, center, radius, (0, 0, 255))
+    centroids=[]
+    for c in contours:
+        centroids.append(get_centroid(c))
+
+    merged_contours = []
+    skip = set()
+    for i,contour in enumerate(contours):
+        if i not in skip:
+            cx1,cy1=centroids[i]
+            same_dot=[contour]
+            for j,contour2 in enumerate(contours): #check for every dot to see if it is within dist pixels from eachother.
+                if not (j<=i or j in skip):
+                    cx2, cy2 = centroids[j]
+                    dist = numpy.hypot(cx1-cx2, cy1-cy2)
+                    if dist < 50: #merge threshold in pixels.
+                        same_dot.append(contour2)
+                        skip.add(j)
+            merged=numpy.vstack(same_dot) #must be a numpy array for cv.
+            merged_contours.append(merged)
+            
+
+    geoCoding = product.getSceneGeoCoding()
+    location_of_ships=[]
+    for c in merged_contours:
+        min_enclosing_circle=cv2.minEnclosingCircle(c)
+        (x, y) = min_enclosing_circle[0]
+        pixel_position = PixelPos(float(x), float(y))
+        long_lat_position = geoCoding.getGeoPos(pixel_position, None)
+        location_of_ships.append([long_lat_position.lat, long_lat_position.lon])
+
+    return location_of_ships
 
 
-plt.imshow(cv2.cvtColor(output, cv2.COLOR_BGR2RGB))
-plt.axis("off")
-plt.title("Specs with circles")
-plt.show()
 
+
+
+    
 
 
 #cropped=img[row:row,column:column]
