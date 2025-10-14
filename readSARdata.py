@@ -3,33 +3,56 @@ import cv2
 import matplotlib.pyplot as plt
 from esa_snappy import ProductIO, PixelPos
 
+
+
 def get_centroid(contour):
     moments = cv2.moments(contour)  #dict of weighted pixel intensities
     if moments["m00"] > 0:
         return int(moments["m10"]/moments["m00"]), int(moments["m01"]/moments["m00"]) #credit geekforgeeks, returns average centre of mass of contours.
     return None
 
-def read_SAR_data(image_path,low,high,threshold_min,min_area):
-    product = ProductIO.readProduct(image_path)
-    band=product.getBand("Sigma0_VH")
-    w=band.getRasterWidth()
-    h=band.getRasterHeight()
-    data=numpy.zeros((h,w)) #h x w matrix of 0s.
-    band.readPixels(0,0,w,h,data) 
 
-    clipped = numpy.clip(data, low, high) #sets all values to low as minimum and high as maximum.
-    img = cv2.normalize(clipped, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
+def process_slice(band,start_x,start_y,width,height,low,high,threshold_min,min_area):
+    data=numpy.zeros((height,width))
+    band.readPixels(start_x,start_y,width,height,data)
+    data=numpy.clip(data,low,high)
+    img = cv2.normalize(data, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
     binary = cv2.threshold(img, threshold_min, 255, cv2.THRESH_BINARY)[1]
-
     pre_contours = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[0]
     contours=[]
     for c in pre_contours:
         if cv2.contourArea(c) > min_area:
+            c[:,0,0]+=start_x
+            c[:,0,1]+=start_y
             contours.append(c)
 
     centroids=[]
     for c in contours:
         centroids.append(get_centroid(c))
+
+    return centroids,contours
+
+
+
+
+def read_SAR_data(image_path,low,high,threshold_min,min_area):
+
+    product = ProductIO.readProduct(image_path)
+    band=product.getBand("Sigma0_VH")
+    w=band.getRasterWidth()
+    h=band.getRasterHeight()
+    geoCoding = product.getSceneGeoCoding()
+    centroids=[]
+    contours=[]
+    slice_size=1000
+
+    for y in range(0,h,slice_size):
+        for x in range(0,w,slice_size):
+            width=min(slice_size,w-x)
+            height=min(slice_size,h-y)
+            new_centroids,new_contours=process_slice(band,x,y,width,height,low,high,threshold_min,min_area)
+            centroids.extend(new_centroids)
+            contours.extend(new_contours)
 
     merged_contours = []
     skip = set()
@@ -48,7 +71,6 @@ def read_SAR_data(image_path,low,high,threshold_min,min_area):
             merged_contours.append(merged)
             
 
-    geoCoding = product.getSceneGeoCoding()
     location_of_ships=[]
     for c in merged_contours:
         min_enclosing_circle=cv2.minEnclosingCircle(c)
@@ -57,10 +79,9 @@ def read_SAR_data(image_path,low,high,threshold_min,min_area):
         long_lat_position = geoCoding.getGeoPos(pixel_position, None)
         location_of_ships.append([long_lat_position.lat, long_lat_position.lon])
 
+
     return location_of_ships
-
-
-
+    
 
 
     
