@@ -6,7 +6,7 @@ import pandas as pd
 
 def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
 
-    ship_locations=read_SAR_data(sar_file,low,high,thresh_min,min_size)
+    ship_locations=[ship_location[0] for ship_location in read_SAR_data(sar_file,low,high,thresh_min,min_size)]
     ais_data=read_AIS_data(ais_folder)
 
     time_filter=ais_data[(ais_data["timestamp"]>=start) & (ais_data["timestamp"]<=end)]
@@ -15,8 +15,8 @@ def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
     dark_ships=[]
 
     for i in range(len(ship_locations)):
-        lat=ship_locations[i][0]
-        lon=ship_locations[i][1]
+        lat=ship_locations[i].lat
+        lon=ship_locations[i].lon
         min_ship_long=math.floor(lon*100)/100 #position recorded wont be perfect
         min_ship_lat=math.floor(lat*100)/100
         lat_filter=time_filter[(time_filter["latitude"]>min_ship_lat)&(time_filter["latitude"]<min_ship_lat+0.02)] #+0.02 to allow for variance.
