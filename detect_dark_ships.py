@@ -25,6 +25,16 @@ def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
         final_filter=lat_filter[(lat_filter["longitude"]>min_ship_long)&(lat_filter["longitude"]<min_ship_long+0.02)]["mmsi"].unique()
 
         if len(final_filter)>0:
+
+            current_dist=10000 #find closest ship
+            closest_mmsi=None
+            for mmsi in final_filter:
+                ais_ship=time_filter[time_filter["mmsi"]==mmsi]
+                dist=math.hypot(ais_ship["latitude"]-lat,ais_ship["longitude"]-lon)
+                if dist<current_dist:
+                    current_dist=dist
+                    closest_mmsi=mmsi
+
             if len(ship)==8: #if multiple ships flag present
                 if ship[7] not in multi_ships:
                     multi_ships[ship[7]]=[1,ship]
@@ -32,10 +42,10 @@ def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
                     multi_ships[ship[7]][0]+=1
                     multi_ships[ship[7]].append(ship)
             else:              
-                ship_found[int(final_filter[0])]=ship #if ship found at coords, then not a dark ship.
+                ship_found[int(closest_mmsi)]=ship #if ship found at coords, then not a dark ship.
 
-            #need to find closest ship to remove
-            time_filter=time_filter[time_filter["mmsi"]!=final_filter[0]] #remove ship from further searches.
+
+            time_filter=time_filter[time_filter["mmsi"]!=closest_mmsi] #remove ship from further searches.
        
         else:
             if len(ship)==8:

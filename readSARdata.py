@@ -122,7 +122,7 @@ def check_contour_multiple_ships(band,x,y,size,geoCoding,low,high,threshold_min)
     results=yolo_model(binary) #get bounding boxes from yolo model
     ship_detections=results[0].boxes
     ship_locations=[]
-
+    multi_ship_group=0
     for box in ship_detections:
         x1,y1,x2,y2=box.xyxy[0] #get bounding box coordinates
         centre_x=(x1+x2)/2
@@ -132,6 +132,11 @@ def check_contour_multiple_ships(band,x,y,size,geoCoding,low,high,threshold_min)
 
     if len(ship_locations)==0:
         return None
+    elif len(ship_locations)>1:
+        for i in range (len(ship_locations)):
+            ship_locations[i].append(multi_ship_group) #add flag to show multiple ships detected.
+        multi_ship_group+=1
+        return ship_locations
     else:
         return ship_locations
 
