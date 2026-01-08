@@ -4,7 +4,9 @@ import math
 from getting_shp_vectors import get_coastline_vectors
 import pandas as pd
 
+
 def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
+
 
     ship_locations=read_SAR_data(sar_file,low,high,thresh_min,min_size)
     ais_data=read_AIS_data(ais_folder)
@@ -17,7 +19,7 @@ def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
 
     for i in range(len(ship_locations)):
         ship=ship_locations[i]
-        ship[0].lat
+        lat=ship[0].lat
         lon=ship[0].lon
         min_ship_long=math.floor(lon*100)/100 #position recorded wont be perfect
         min_ship_lat=math.floor(lat*100)/100
@@ -25,22 +27,25 @@ def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
         final_filter=lat_filter[(lat_filter["longitude"]>min_ship_long)&(lat_filter["longitude"]<min_ship_long+0.02)]["mmsi"].unique()
 
         if len(final_filter)>0:
-
             current_dist=10000 #find closest ship
             closest_mmsi=None
             for mmsi in final_filter:
                 ais_ship=time_filter[time_filter["mmsi"]==mmsi]
-                dist=math.hypot(ais_ship["latitude"]-lat,ais_ship["longitude"]-lon)
+                discovered_lat = ais_ship.iloc[0]["latitude"]
+                discovered_lon = ais_ship.iloc[0]["longitude"]
+                dist=math.hypot(discovered_lat-lat,discovered_lon-lon)
                 if dist<current_dist:
                     current_dist=dist
                     closest_mmsi=mmsi
 
             if len(ship)==8: #if multiple ships flag present
-                if ship[7] not in multi_ships:
+                if ship[7] not in multi_ships.keys():
                     multi_ships[ship[7]]=[1,ship]
+                    multi_ships[ship[7]][1].append(closest_mmsi)
                 else:
                     multi_ships[ship[7]][0]+=1
                     multi_ships[ship[7]].append(ship)
+                    multi_ships[ship[7]][1].append(closest_mmsi)
             else:              
                 ship_found[int(closest_mmsi)]=ship #if ship found at coords, then not a dark ship.
 
@@ -54,35 +59,41 @@ def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
                 else:
                     multi_ships[ship[7]].append(ship)
             else:
-                dark_ships.extend(ship) #if ships not found at coords, then dark ship has been detected.
+                dark_ships.append(ship) #if ships not found at coords, then dark ship has been detected.
 
-    for key in multi_ships.keys():
+    for key in list(multi_ships.keys()):
         ship_data=multi_ships[key]
-        if len(ship_data)-1==ship_data[0]: #if ships detected than found in AIS, then no dark ship/s present.
+        if len(ship_data)-1==ship_data[0]: #if same number of ships detected as found in AIS, then no dark ship/s present.
+            for j in range (1,len(ship_data)):
+                ship_found[ship_data[j][-1]]=ship_data[j][:-2] #add confirmed ship to found ships, removing flags and mmsi from ship list.
             del multi_ships[key]
-
 
 
 
     return dark_ships,ship_found,multi_ships
 
-
-dark_ships,_=find_dark_ships("2023-06-03 18:03:00","2023-06-03 18:10:00","20230603","mosaic_msk.dim",0.0001516640332, 0.04868127104362205,250,5)
-
 '''
+found_dark_ships,ship_found,multi_ship=find_dark_ships("2023-06-03 18:03:00","2023-06-03 18:10:00","20230603","mosaic_msk.dim",0.0001516640332, 0.04868127104362205,250,5)
+
+dark_ships=[]
+for ship in found_dark_ships:
+    dark_ships.append([ship[0].lat,ship[0].lon])
+
+
 df = pd.read_csv("ships_snap.txt", delim_whitespace=True)
 dark_ships = df[["lon", "lat"]].to_numpy()
 dark_ships = dark_ships.tolist()
-'''
-coastline=get_coastline_vectors("coastlines-split-4326")
+
+
+coastline=get_coastline_vectors("coastlines-split-4326/coastlines-split-4326/lines.shp")
 
 
 new_dark_ships=[]
 for lat,lon in dark_ships[:]:
     min_ship_long=math.floor(lon*100)/100 #position recorded wont be perfect
     min_ship_lat=math.floor(lat*100)/100
-    lat_filter=coastline[(coastline["latitude"]>min_ship_lat-0.035)&(coastline["latitude"]<min_ship_lat+0.035)] #within 0.035, about 2.2km from a coastline, ignore result.
-    final_filter=lat_filter[(lat_filter["longitude"]>min_ship_long-0.035)&(lat_filter["longitude"]<min_ship_long+0.035)]
+    lat_filter=coastline[(coastline["latitude"]>min_ship_lat-0.01)&(coastline["latitude"]<min_ship_lat+0.01)] #within 0.035, about 2.2km from a coastline, ignore result.
+    final_filter=lat_filter[(lat_filter["longitude"]>min_ship_long-0.01)&(lat_filter["longitude"]<min_ship_long+0.01)]
 
     if len(final_filter)>0 or lat<50.4: #50.4 is minimum latitude for irish sea, remove if finding is close enough to land.
         pass
@@ -100,3 +111,4 @@ def write_ships_to_csv(ship_locations):
 
 
 write_ships_to_csv(new_dark_ships)
+'''
