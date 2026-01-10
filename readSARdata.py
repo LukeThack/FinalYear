@@ -3,7 +3,7 @@ import cv2
 import matplotlib.pyplot as plt
 from esa_snappy import ProductIO, PixelPos
 from ultralytics import YOLO
-yolo_model=YOLO("runs/detect/SSDD_YOLO/weights/best.pt")
+yolo_model=YOLO("runs/detect/ssdd_offshore/weights/best.pt")
 
 
 
@@ -78,7 +78,7 @@ def read_SAR_data(image_path,low,high,threshold_min,min_area):
     for c in merged_contours:
         min_enclosing_circle=cv2.minEnclosingCircle(c)
         (x, y) = min_enclosing_circle[0]
-        sep_ship_detections,multi_ship_group=check_contour_multiple_ships(band,x,y,100,geoCoding,low,high,multi_ship_group)
+        sep_ship_detections,multi_ship_group=check_contour_multiple_ships(band,x,y,300,geoCoding,low,high,multi_ship_group)
         if sep_ship_detections is not None:
             for ship_detection in sep_ship_detections:
                 already_exist=False
@@ -126,11 +126,18 @@ def check_contour_multiple_ships(band,x,y,size,geoCoding,low,high,multi_ship_gro
     ship_detections=results[0].boxes
     ship_locations=[]
     for box in ship_detections:
-        x1,y1,x2,y2=box.xyxy[0] #get bounding box coordinates
-        centre_x=(x1+x2)/2 + start_x
-        centre_y=(y1+y2)/2 + start_y
-        centred_geo=geoCoding.getGeoPos(PixelPos(float(centre_x),float(centre_y)), None)
-        ship_locations.append([centred_geo,centre_x,centre_y,x1+start_x,y1+start_y,x2+start_x,y2+start_y]) #save geo located centre,pixel centre and bounding box coords.
+        if hasattr(box.cls,"item"):
+            cls_id=int(box.cls.item())
+            print(box.cls.item())
+        else:
+            cls_id=int(box.cls)
+            print(box.cls)
+        if cls_id==0:
+            x1,y1,x2,y2=box.xyxy[0] #get bounding box coordinates
+            centre_x=(x1+x2)/2 + start_x
+            centre_y=(y1+y2)/2 + start_y
+            centred_geo=geoCoding.getGeoPos(PixelPos(float(centre_x),float(centre_y)), None)
+            ship_locations.append([centred_geo,centre_x,centre_y,x1+start_x,y1+start_y,x2+start_x,y2+start_y]) #save geo located centre,pixel centre and bounding box coords.
 
     if len(ship_locations)==0:
         return None,multi_ship_group

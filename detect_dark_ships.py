@@ -40,12 +40,10 @@ def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
 
             if len(ship)==8: #if multiple ships flag present
                 if ship[7] not in multi_ships.keys():
-                    multi_ships[ship[7]]=[1,ship]
-                    multi_ships[ship[7]][1].append(closest_mmsi)
+                    multi_ships[ship[7]]=[1,[ship,closest_mmsi]]
                 else:
                     multi_ships[ship[7]][0]+=1
-                    multi_ships[ship[7]].append(ship)
-                    multi_ships[ship[7]][1].append(closest_mmsi)
+                    multi_ships[ship[7]].append([ship,closest_mmsi])
             else:              
                 ship_found[int(closest_mmsi)]=ship #if ship found at coords, then not a dark ship.
 
@@ -55,25 +53,35 @@ def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
         else:
             if len(ship)==8:
                 if multi_ships.get(ship[7]) is None:
-                    multi_ships[ship[7]]=[0,ship]
+                    multi_ships[ship[7]]=[0,[ship,None]]
                 else:
-                    multi_ships[ship[7]].append(ship)
+                    multi_ships[ship[7]].append([ship,None])
             else:
                 dark_ships.append(ship) #if ships not found at coords, then dark ship has been detected.
 
     for key in list(multi_ships.keys()):
         ship_data=multi_ships[key]
         if len(ship_data)-1==ship_data[0]: #if same number of ships detected as found in AIS, then no dark ship/s present.
-            for j in range (1,len(ship_data)):
-                ship_found[ship_data[j][-1]]=ship_data[j][:-2] #add confirmed ship to found ships, removing flags and mmsi from ship list.
+            for ship in ship_data[1:]:
+                ship_found[ship[1]]=ship[0] #add confirmed ship to found ships
+            del multi_ships[key]
+        elif len(ship_data)==2:
+            dark_ships.append(ship_data[1]) #if only one ship detected and not found in AIS, then dark ship list.
             del multi_ships[key]
 
 
 
     return dark_ships,ship_found,multi_ships
-
 '''
 found_dark_ships,ship_found,multi_ship=find_dark_ships("2023-06-03 18:03:00","2023-06-03 18:10:00","20230603","mosaic_msk.dim",0.0001516640332, 0.04868127104362205,250,5)
+print(len(ship_found))
+'''
+'''
+dark_ships=[]
+for key in multi_ship.keys():
+    group=multi_ship[key]
+    for ship in group[1:]:
+        dark_ships.append([ship[0][0].lat,ship[0][0].lon])
 
 dark_ships=[]
 for ship in found_dark_ships:

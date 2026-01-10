@@ -1,9 +1,9 @@
 import json
 import os
 
-coco_json_path="SSDD_YOLO_IMAGES/dataset/annotations/instances_train.json" 
+coco_json_path="SSDD_YOLO_IMAGES/dataset/annotations/instances_val.json" 
 images_dir="SSDD_YOLO_IMAGES/dataset/images"
-output_dir="SSDD_YOLO_IMAGES/dataset/labels/train"
+output_dir="SSDD_YOLO_IMAGES/dataset/labels/val"
 os.makedirs(output_dir,exist_ok=True)
 
 with open(coco_json_path) as file:
