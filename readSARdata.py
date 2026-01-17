@@ -1,9 +1,9 @@
 import numpy
 import cv2
 import matplotlib.pyplot as plt
-from esa_snappy import ProductIO, PixelPos
+from esa_snappy import ProductIO, PixelPos, GeoPos
 from ultralytics import YOLO
-yolo_model=YOLO("runs/detect/ssdd_offshore/weights/best.pt")
+yolo_model=YOLO("runs/obb/train/weights/best.pt")
 
 
 
@@ -82,14 +82,14 @@ def read_SAR_data(image_path,low,high,threshold_min,min_area):
         if sep_ship_detections is not None:
             for ship_detection in sep_ship_detections:
                 already_exist=False
-                mid_x=ship_detection[1]
-                mid_y=ship_detection[2]
+                mid_x=ship_detection.pixel_centre[0]
+                mid_y=ship_detection.pixel_centre[1]
 
                 for location in location_of_ships:
-                    dist=numpy.hypot(location[1]-mid_x,location[2]-mid_y)
+                    dist=numpy.hypot(location.pixel_centre[0]-mid_x,location.pixel_centre[1]-mid_y)
                     if dist<20: #if two detected ships are within 20 pixels of eachother, assume they are the same ship.
                         already_exist=True
-                        if location[3]-location[5]>ship_detection[3]-ship_detection[5] and location[4]-location[6]>ship_detection[4]-ship_detection[6]: #if new detection has a larger bounding box, replace old one.
+                        if location.area<ship_detection.area: #if new detection has a larger bounding box, replace old one.
                             location_of_ships.remove(location)
                             location_of_ships.append(ship_detection)
                         break
@@ -123,27 +123,39 @@ def check_contour_multiple_ships(band,x,y,size,geoCoding,low,high,multi_ship_gro
 
     results=yolo_model(img_3_channel) #get bounding boxes from yolo model
 
-    ship_detections=results[0].boxes
+    ship_detections=results[0].obb
     ship_locations=[]
     for box in ship_detections:
         if hasattr(box.cls,"item"):
             cls_id=int(box.cls.item())
-            print(box.cls.item())
         else:
             cls_id=int(box.cls)
-            print(box.cls)
         if cls_id==0:
-            x1,y1,x2,y2=box.xyxy[0] #get bounding box coordinates
-            centre_x=(x1+x2)/2 + start_x
-            centre_y=(y1+y2)/2 + start_y
-            centred_geo=geoCoding.getGeoPos(PixelPos(float(centre_x),float(centre_y)), None)
-            ship_locations.append([centred_geo,centre_x,centre_y,x1+start_x,y1+start_y,x2+start_x,y2+start_y]) #save geo located centre,pixel centre and bounding box coords.
+            rotated_box=box.xyxyxyxy[0]
+            x1=int(rotated_box[0][0])
+            y1=int(rotated_box[0][1])
+            x2=int(rotated_box[1][0])
+            y2=int(rotated_box[1][1])
+            x3=int(rotated_box[2][0])
+            y3=int(rotated_box[2][1])
+            x4=int(rotated_box[3][0])
+            y4=int(rotated_box[3][1])
+
+            centre_x=(x1+x4)/2 + start_x
+            centre_y=(y1+y4)/2 + start_y
+            geo = GeoPos()
+            geoCoding.getGeoPos(
+                PixelPos(float(centre_x), float(centre_y)),
+                geo
+            )
+            ship=Ship([geo.lat,geo.lon],[centre_x,centre_y],[x1,y1,x2,y2,x3,y3,x4,y4],None)
+            ship_locations.append(ship) #save geo located centre,pixel centre and bounding box coords.
 
     if len(ship_locations)==0:
         return None,multi_ship_group
     elif len(ship_locations)>1:
         for i in range (len(ship_locations)):
-            ship_locations[i].append(multi_ship_group) #add flag to show multiple ships detected.
+            ship_locations[i].multiship_group=multi_ship_group #add flag to show multiple ships detected.
         multi_ship_group+=1
         return ship_locations, multi_ship_group
     else:
@@ -151,7 +163,24 @@ def check_contour_multiple_ships(band,x,y,size,geoCoding,low,high,multi_ship_gro
 
 
     
+class Ship:
+    def __init__(self,geo_centre,pixel_centre,rbbox,multiship_group):
+        self.geo_centre=geo_centre
+        self.pixel_centre=pixel_centre
+        self.rbbox=rbbox
+        self.multiship_group=multiship_group
+        self.area=shoelace(rbbox)
+        
 
+    
+def shoelace(bbox):
+    sum1=0
+    sum2=0
+    for i in range(0,len(bbox),2):
+        sum1+=bbox[i-2]*bbox[i+1]
+        sum2+=bbox[i-1]*bbox[i]
+    return 0.5*(abs(sum1-sum2))
+    
 
 
 #cropped=img[row:row,column:column]

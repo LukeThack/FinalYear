@@ -1,7 +1,7 @@
 from readAIS import read_AIS_data
 from readSARdata import read_SAR_data
 import math
-from getting_shp_vectors import get_coastline_vectors
+from getting_ship_vectors import get_coastline_vectors
 import pandas as pd
 
 
@@ -19,8 +19,8 @@ def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
 
     for i in range(len(ship_locations)):
         ship=ship_locations[i]
-        lat=ship[0].lat
-        lon=ship[0].lon
+        lat=ship.geo_centre[0]
+        lon=ship.geo_centre[1]
         min_ship_long=math.floor(lon*100)/100 #position recorded wont be perfect
         min_ship_lat=math.floor(lat*100)/100
         lat_filter=time_filter[(time_filter["latitude"]>min_ship_lat)&(time_filter["latitude"]<min_ship_lat+0.02)] #+0.02 to allow for variance.
@@ -38,12 +38,12 @@ def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
                     current_dist=dist
                     closest_mmsi=mmsi
 
-            if len(ship)==8: #if multiple ships flag present
-                if ship[7] not in multi_ships.keys():
-                    multi_ships[ship[7]]=[1,[ship,closest_mmsi]]
+            if ship.multiship_group: #if multiple ships flag present
+                if ship.multiship_group not in multi_ships.keys():
+                    multi_ships[ship.multiship_group]=[1,[ship,closest_mmsi]]
                 else:
-                    multi_ships[ship[7]][0]+=1
-                    multi_ships[ship[7]].append([ship,closest_mmsi])
+                    multi_ships[ship.multiship_group][0]+=1
+                    multi_ships[ship.multiship_group].append([ship,closest_mmsi])
             else:              
                 ship_found[int(closest_mmsi)]=ship #if ship found at coords, then not a dark ship.
 
@@ -51,22 +51,24 @@ def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
             time_filter=time_filter[time_filter["mmsi"]!=closest_mmsi] #remove ship from further searches.
        
         else:
-            if len(ship)==8:
-                if multi_ships.get(ship[7]) is None:
-                    multi_ships[ship[7]]=[0,[ship,None]]
+            if ship.multiship_group:
+                if multi_ships.get(ship.multiship_group) is None:
+                    multi_ships[ship.multiship_group]=[0,[ship,None]]
                 else:
-                    multi_ships[ship[7]].append([ship,None])
+                    multi_ships[ship.multiship_group].append([ship,None])
             else:
                 dark_ships.append(ship) #if ships not found at coords, then dark ship has been detected.
 
     for key in list(multi_ships.keys()):
         ship_data=multi_ships[key]
+
         if len(ship_data)-1==ship_data[0]: #if same number of ships detected as found in AIS, then no dark ship/s present.
             for ship in ship_data[1:]:
                 ship_found[ship[1]]=ship[0] #add confirmed ship to found ships
             del multi_ships[key]
+
         elif len(ship_data)==2:
-            dark_ships.append(ship_data[1]) #if only one ship detected and not found in AIS, then dark ship list.
+            dark_ships.append(ship_data[1][0]) #if only one ship detected and not found in AIS, then dark ship list.
             del multi_ships[key]
 
 
