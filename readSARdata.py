@@ -148,7 +148,7 @@ def check_contour_multiple_ships(band,x,y,size,geoCoding,low,high,multi_ship_gro
                 PixelPos(float(centre_x), float(centre_y)),
                 geo
             )
-            ship=Ship([geo.lat,geo.lon],[centre_x,centre_y],[x1,y1,x2,y2,x3,y3,x4,y4],None)
+            ship=Ship([geo.lat,geo.lon],[centre_x,centre_y],[start_x+x1,start_y+y1,start_x+x2,start_y+y2,start_x+x3,start_y+y3,start_x+x4,start_y+y4],None)
             ship_locations.append(ship) #save geo located centre,pixel centre and bounding box coords.
 
     if len(ship_locations)==0:
