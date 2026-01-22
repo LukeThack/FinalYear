@@ -2,7 +2,6 @@ from detect_dark_ships import find_dark_ships
 from esa_snappy import ProductIO
 import numpy
 import cv2
-import json
 import matplotlib.pyplot as plt
 import pandas as pd
 from getting_ship_vectors import get_coastline_vectors
@@ -112,7 +111,7 @@ def label_ships(image_path,low,high,found_dark_ships,output_dir,max_image_id):
         width,height=300,300
         output_lines=[]
         for box in results[0].obb.xyxyxyxy:
-            x1=float(box[1][0])/width
+            x1=float(box[0][0])/width
             y1=float(box[0][1])/height
             x2=float(box[1][0])/width
             y2=float(box[1][1])/height

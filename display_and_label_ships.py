@@ -3,30 +3,48 @@ from esa_snappy import ProductIO
 from readAIS import read_AIS_data
 import numpy
 import cv2
-import json
 import matplotlib.pyplot as plt
-import pandas as pd
 from getting_ship_vectors import get_coastline_vectors
 import math
 from ultralytics import YOLO
+import os
 yolo_model=YOLO("runs/obb/train/weights/best.pt")
 
-_,confrimed_ships,_=find_dark_ships("2023-06-03 18:03:00","2023-06-03 18:10:00","20230603","mosaic_msk.dim",0.0001516640332, 0.04868127104362205,250,5)
+_,found_confirmed_ships,_=find_dark_ships("2023-06-03 18:03:00","2023-06-03 18:10:00","20230603","mosaic_msk.dim",0.0001516640332, 0.04868127104362205,250,5)
+
+pos_confirmed_ship=[]
+for key in found_confirmed_ships.keys():
+    ship=found_confirmed_ships[key]
+    pos_confirmed_ship.append([ship.geo_centre[0],ship.geo_centre[1]])
+
+
+coastline=get_coastline_vectors("coastlines-split-4326/coastlines-split-4326/lines.shp")
+i=0
+confirmed_ships={}
+
+for lat,lon in pos_confirmed_ship[:]:
+    min_ship_long=math.floor(lon*100)/100 #position recorded wont be perfect
+    min_ship_lat=math.floor(lat*100)/100
+    lat_filter=coastline[(coastline["latitude"]>min_ship_lat-0.01)&(coastline["latitude"]<min_ship_lat+0.01)] #within 0.035, about 2.2km from a coastline, ignore result.
+    final_filter=lat_filter[(lat_filter["longitude"]>min_ship_long-0.01)&(lat_filter["longitude"]<min_ship_long+0.01)]
+
+    if len(final_filter)>0 or lat<50.4: #50.4 is minimum latitude for irish sea, remove if finding is close enough to land.
+        pass
+    else:
+        ship_key=list(found_confirmed_ships.keys())[i]
+        confirmed_ships[ship_key]=found_confirmed_ships[ship_key]
+    i+=1
+
+
+
+
+
 
 ship_type_dict={
-    "HSC": "High Speed Craft",
     "MER": "Merchant",
     "TNK": "Tanker",
     "FSH": "Fishing",
-    "PLS": "Pleasure Craft",
     "TUG": "Tug",
-    "PLT": "Pilot Vessel",
-    "PRT": "Port Tender",
-    "WIG": "Wing In Ground",
-    "NAV": "Navigation Aid",
-    "AIR": "Aircraft",
-    "SAR": "Search and Rescue",
-    "LAW": "Law Enforcement",
     "MIL": "Military",
 }
 
@@ -55,7 +73,6 @@ def show_image(key,low,high,ship,band,file_name,ais_df):
     height=max_y-min_y
     width=max_x-min_x
 
-
     flat_array=numpy.zeros(width*height,dtype=numpy.float32) #has to be a flat array for read pixels of small values.
     band.readPixels(min_x, min_y, width, height, flat_array)
     data = flat_array.reshape((height, width))
@@ -65,8 +82,10 @@ def show_image(key,low,high,ship,band,file_name,ais_df):
     points[:,0]-=min_x
     points[:,1]-=min_y
     centre,(rect_width,rect_height),angle=cv2.minAreaRect(points)
-    if angle<-45:
+
+    if rect_height<rect_width: #rotate image to be vertical.
         angle+=90
+        rect_width,rect_height=rect_height,rect_width
 
     rotation_matrix=cv2.getRotationMatrix2D(centre,angle,1.0)
 
@@ -78,19 +97,16 @@ def show_image(key,low,high,ship,band,file_name,ais_df):
 
     centre_offset_x=(new_width/2)-centre[0]
     centre_offset_y=(new_height/2)-centre[1]
-    rotation_matrix[0,2]+=centre_offset_x #move matrix to new centre, 2x2 rotation, 2x1 translation to make 2x3 matrix.
+    rotation_matrix[0,2]+=centre_offset_x #move image to centre of new canvas, 2x2 rotation, 2x1 translation to make 2x3 matrix.
     rotation_matrix[1,2]+=centre_offset_y
-
     rotated_image=cv2.warpAffine(data,rotation_matrix,(new_width, new_height))
 
-    centre[0]
-
     h,w=rotated_image.shape[:2]
-    rotated_image = rotated_image[int((h-rect_height)/2):int((h+rect_height)/2),int((w-rect_width)/2):int((w+rect_width)/2)] #rotated about centre of bounding box - centre of new image is centre of bounding box
-    if rect_height<rect_width:
-        rotated_image=cv2.rotate(rotated_image, cv2.ROTATE_90_CLOCKWISE) #orientate vertically
-
-
+    max_x_crop=max(0,int((w-rect_width)/2)) #avoid negatives
+    min_x_crop=min(w,int((w+rect_width)/2))
+    max_y_crop=max(0,int((h-rect_height)/2))
+    min_y_crop=min(h,int((h+rect_height)/2))
+    rotated_image = rotated_image[y1:y2, x1:x2]
 
 
     img=cv2.normalize(rotated_image, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
@@ -98,19 +114,18 @@ def show_image(key,low,high,ship,band,file_name,ais_df):
     data2=cv2.normalize(data, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
     data3=cv2.merge([data2,data2,data2])
 
-
-    fig,axes=plt.subplots(1,2,figsize=(10,5))
+    _,axes=plt.subplots(1,2,figsize=(10,5))
     axes[0].imshow(img_3_channel, interpolation="nearest")
     axes[0].set_title(display_ship_type)
     axes[0].axis('off')
     axes[1].imshow(data3, interpolation="nearest")
     axes[1].set_title("Second image")
     axes[1].axis('off')
-
     plt.show()
+
     category=0
-    while category not in ["0","1","2","3"]:
-        category=input("Enter category for ship (0- Container Ship, 1- Oil Tanker, 2- Fishing,  3-Other): \n")
+    while category not in ["0","1","2","3","4","5"]:
+        category=input("Enter category for ship (0-Merchant, 1-Tanker, 2-Fishing, 3-Military, 4-Tug, 5-Other): \n")
     category=int(category)
     acceptable=2
     while acceptable not in ["0","1"]:
@@ -122,11 +137,7 @@ def show_image(key,low,high,ship,band,file_name,ais_df):
     return category,acceptable
 
 
-
-
-
-
-def label_ships(image_path,low,high,confirmed_ships,json_file,max_image_id,ais_folder):
+def label_ships(image_path,low,high,confirmed_ships,output_dir,max_image_id,ais_folder):
     ais_df=read_AIS_data(ais_folder)
     product = ProductIO.readProduct(image_path)
     band=product.getBand("Sigma0_VH")
@@ -140,51 +151,12 @@ def label_ships(image_path,low,high,confirmed_ships,json_file,max_image_id,ais_f
         if not acceptable:
             print("Label not accepted, skipping...")
             continue
-''' 
-        x1=int(ship[3])
-        y1=int(ship[4])
-        x2=int(ship[5])
-        y2=int(ship[6])
-        box_width=x2-x1
-        box_height=y2-y1
-        area=(box_width)*(box_height)
-
-        new_image={
-            "file_name":file_name,
-            "height":box_height,
-            "width":box_width,
-            "id":max_image_id+i,
-        }
+    
+        output_file_path=os.path.join(output_dir,os.path.basename(file_name).replace(".jpg",".txt"))
+        with open(output_file_path,"w") as output_file:
+            output_file.write(category)
 
 
-        new_annotation={
-            "area":area,
-            "iscrowd":0,
-            "image_id":max_image_id+i,
-            "bbox":[x1,y1,box_width,box_height],
-            "category_id":category,
-            "id":max_image_id+i,
-        }
 
-        with open(json_file,"r") as f:
-            data=json.load(f)
-
-        if "images" not in data or not data["images"]:
-            data["images"] = []
-        if "annotations" not in data or not data["annotations"]:
-            data["annotations"] = []
-
-        data["images"].append(new_image)
-        data["annotations"].append(new_annotation)
-
-        if "categories" not in data or not data["categories"]:
-            data["categories"] = [
-                {"id": 0, "name": "Ship"},
-                {"id": 1, "name": "Infrastructure"},
-                {"id": 2, "name": "Ambiguous"},
-            ]
-        with open(json_file,"w") as f:
-            json.dump(data,f,indent=4) 
-'''
-label_ships("mosaic_msk.dim",0.0001516640332, 0.04868127104362205,confrimed_ships,"SHIP_CATEGORISATION_IMAGES/dataset/annotations/instances_train.json",0,"20230603")
+label_ships("mosaic_msk.dim",0.0001516640332, 0.04868127104362205,confirmed_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/train",0,"20230603")
 
