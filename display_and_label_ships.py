@@ -10,7 +10,9 @@ from ultralytics import YOLO
 import os
 yolo_model=YOLO("runs/obb/train/weights/best.pt")
 
-_,found_confirmed_ships,_=find_dark_ships("2023-06-03 18:03:00","2023-06-03 18:10:00","20230603","mosaic_msk.dim",0.0001516640332, 0.04868127104362205,250,5)
+dark_ships,found_confirmed_ships,multi_ships=find_dark_ships("2023-06-03 18:03:00","2023-06-03 18:10:00","20230603","mosaic_msk.dim",0.0001516640332, 0.04868127104362205,250,5)
+
+
 
 pos_confirmed_ship=[]
 for key in found_confirmed_ships.keys():
@@ -34,10 +36,6 @@ for lat,lon in pos_confirmed_ship[:]:
         ship_key=list(found_confirmed_ships.keys())[i]
         confirmed_ships[ship_key]=found_confirmed_ships[ship_key]
     i+=1
-
-
-
-
 
 
 ship_type_dict={
@@ -99,14 +97,15 @@ def show_image(key,low,high,ship,band,file_name,ais_df):
     centre_offset_y=(new_height/2)-centre[1]
     rotation_matrix[0,2]+=centre_offset_x #move image to centre of new canvas, 2x2 rotation, 2x1 translation to make 2x3 matrix.
     rotation_matrix[1,2]+=centre_offset_y
+
     rotated_image=cv2.warpAffine(data,rotation_matrix,(new_width, new_height))
 
     h,w=rotated_image.shape[:2]
-    max_x_crop=max(0,int((w-rect_width)/2)) #avoid negatives
-    min_x_crop=min(w,int((w+rect_width)/2))
-    max_y_crop=max(0,int((h-rect_height)/2))
-    min_y_crop=min(h,int((h+rect_height)/2))
-    rotated_image = rotated_image[y1:y2, x1:x2]
+    min_x_crop=max(0,int((w-rect_width)/2)) #avoid negatives
+    max_x_crop=min(w,int((w+rect_width)/2))
+    min_y_crop=max(0,int((h-rect_height)/2))
+    max_y_crop=min(h,int((h+rect_height)/2))
+    rotated_image = rotated_image[min_y_crop:max_y_crop, min_x_crop:max_x_crop]
 
 
     img=cv2.normalize(rotated_image, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
@@ -132,7 +131,7 @@ def show_image(key,low,high,ship,band,file_name,ais_df):
         acceptable=input("Is this image acceptable? (1- Yes, 0- No): \n")
     acceptable=int(acceptable)
     if acceptable:
-        cv2.imwrite("SHIP_CATEGORISATION_IMAGES/dataset/images/train/"+file_name, img_3_channel)
+        cv2.imwrite("SHIP_CATEGORISATION_IMAGES/dataset/images/"+file_name, img_3_channel)
 
     return category,acceptable
 
@@ -154,9 +153,9 @@ def label_ships(image_path,low,high,confirmed_ships,output_dir,max_image_id,ais_
     
         output_file_path=os.path.join(output_dir,os.path.basename(file_name).replace(".jpg",".txt"))
         with open(output_file_path,"w") as output_file:
-            output_file.write(category)
+            output_file.write(str(category))
 
 
 
-label_ships("mosaic_msk.dim",0.0001516640332, 0.04868127104362205,confirmed_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/train",0,"20230603")
+label_ships("mosaic_msk.dim",0.0001516640332, 0.04868127104362205,confirmed_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/",0,"20230603")
 
