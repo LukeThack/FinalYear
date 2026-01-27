@@ -41,7 +41,7 @@ def read_SAR_data(image_path,low,high,threshold_min,min_area):
 
     multi_ship_group=0
     product = ProductIO.readProduct(image_path)
-    band=product.getBand("Sigma0_VH")
+    band=product.getBand("Sigma0_VV_ocean")
     w=band.getRasterWidth()
     h=band.getRasterHeight()
     geoCoding = product.getSceneGeoCoding()

@@ -36,7 +36,7 @@ BandDescriptor = jpy.get_type("org.esa.snap.core.gpf.common.BandMathsOp$BandDesc
 band=BandDescriptor()
 band.name="Sigma0_VV_ocean"     
 band.type="float32"             
-band.expression="if (UKIRMask==0) then Sigma0_VV else NaN"
+band.expression="if (UKIRMask==0) then Sigma0_VV else 0"
 band_array=jpy.array(BandDescriptor,1)
 band_array[0]=band
 bm_params=HashMap()

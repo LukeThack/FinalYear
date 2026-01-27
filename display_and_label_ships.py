@@ -10,7 +10,7 @@ from ultralytics import YOLO
 import os
 yolo_model=YOLO("runs/obb/train/weights/best.pt")
 
-dark_ships,found_confirmed_ships,multi_ships=find_dark_ships("2023-06-03 18:03:00","2023-06-03 18:10:00","20230603","mosaic_msk.dim",0.0001516640332, 0.04868127104362205,250,5)
+dark_ships,found_confirmed_ships,multi_ships=find_dark_ships("2023-06-03 17:51:00","2023-06-03 18:21:00","20230603","newS1A_processed.dim",0,0.0511554144323,250,5)
 
 
 
@@ -139,7 +139,7 @@ def show_image(key,low,high,ship,band,file_name,ais_df):
 def label_ships(image_path,low,high,confirmed_ships,output_dir,max_image_id,ais_folder):
     ais_df=read_AIS_data(ais_folder)
     product = ProductIO.readProduct(image_path)
-    band=product.getBand("Sigma0_VH")
+    band=product.getBand("Sigma0_VV_ocean")
     all_ship_keys=confirmed_ships.keys()
 
     for i,key in enumerate(all_ship_keys):
@@ -157,5 +157,5 @@ def label_ships(image_path,low,high,confirmed_ships,output_dir,max_image_id,ais_
 
 
 
-label_ships("mosaic_msk.dim",0.0001516640332, 0.04868127104362205,confirmed_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/",0,"20230603")
+label_ships("newS1A_processed.dim",0, 0.0511554144323,confirmed_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/",0,"20230603")
 
