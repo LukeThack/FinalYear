@@ -1,4 +1,5 @@
 from detect_dark_ships import find_dark_ships
+from readSARdata import get_low_high
 from esa_snappy import ProductIO
 from readAIS import read_AIS_data
 import numpy
@@ -10,8 +11,8 @@ from ultralytics import YOLO
 import os
 yolo_model=YOLO("runs/obb/train/weights/best.pt")
 
-dark_ships,found_confirmed_ships,multi_ships=find_dark_ships("2023-06-03 17:51:00","2023-06-03 18:21:00","20230603","newS1A_processed.dim",0,0.0511554144323,250,5)
-
+dark_ships,found_confirmed_ships,multi_ships=find_dark_ships("202306","satelite/image3.dim",250,5)
+print(len(dark_ships),len(found_confirmed_ships),len(multi_ships))
 
 
 pos_confirmed_ship=[]
@@ -46,7 +47,7 @@ ship_type_dict={
     "MIL": "Military",
 }
 
-def show_image(key,low,high,ship,band,file_name,ais_df):
+def show_image(key,ship,band,file_name,ais_df):
     ship_type=ais_df[ais_df["mmsi"]==int(key)]["ship_type"].values[0]
     display_ship_type=ship_type_dict.get(str(ship_type),"Other")
 
@@ -74,6 +75,7 @@ def show_image(key,low,high,ship,band,file_name,ais_df):
     flat_array=numpy.zeros(width*height,dtype=numpy.float32) #has to be a flat array for read pixels of small values.
     band.readPixels(min_x, min_y, width, height, flat_array)
     data = flat_array.reshape((height, width))
+    low,high=get_low_high(band)
     data=numpy.clip(data,low,high)
 
     points=numpy.array([[x1,y1],[x2,y2],[x3,y3],[x4,y4]],dtype=numpy.float32)
@@ -136,16 +138,16 @@ def show_image(key,low,high,ship,band,file_name,ais_df):
     return category,acceptable
 
 
-def label_ships(image_path,low,high,confirmed_ships,output_dir,max_image_id,ais_folder):
+def label_ships(image_path,confirmed_ships,output_dir,max_image_id,ais_folder):
     ais_df=read_AIS_data(ais_folder)
     product = ProductIO.readProduct(image_path)
-    band=product.getBand("Sigma0_VV_ocean")
+    band=product.getBand("Gamma0_VV_ocean")
     all_ship_keys=confirmed_ships.keys()
 
     for i,key in enumerate(all_ship_keys):
         ship=confirmed_ships[key]
         file_name="luke_ship_{}.jpg".format(i+max_image_id)
-        category,acceptable=show_image(key,low,high,ship,band,file_name,ais_df)
+        category,acceptable=show_image(key,ship,band,file_name,ais_df)
             
         if not acceptable:
             print("Label not accepted, skipping...")
@@ -157,5 +159,4 @@ def label_ships(image_path,low,high,confirmed_ships,output_dir,max_image_id,ais_
 
 
 
-label_ships("newS1A_processed.dim",0, 0.0511554144323,confirmed_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/",0,"20230603")
-
+label_ships("satelite/image3.dim",confirmed_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/",0,"202306")

@@ -5,10 +5,13 @@ from getting_ship_vectors import get_coastline_vectors
 import pandas as pd
 
 
-def find_dark_ships(start,end,ais_folder,sar_file,low,high,thresh_min,min_size):
+def find_dark_ships(ais_folder,sar_file,thresh_min,min_size):
 
 
-    ship_locations=read_SAR_data(sar_file,low,high,thresh_min,min_size)
+    ship_locations,time=read_SAR_data(sar_file,thresh_min,min_size)
+    end=str(pd.to_datetime(time)+pd.to_timedelta("15min"))
+    start=str(pd.to_datetime(time)-pd.to_timedelta("15min"))
+
     ais_data=read_AIS_data(ais_folder)
 
     time_filter=ais_data[(ais_data["timestamp"]>=start) & (ais_data["timestamp"]<=end)]

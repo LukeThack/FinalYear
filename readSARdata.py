@@ -3,6 +3,8 @@ import cv2
 import matplotlib.pyplot as plt
 from esa_snappy import ProductIO, PixelPos, GeoPos
 from ultralytics import YOLO
+from datetime import datetime
+from scipy.spatial import cKDTree
 yolo_model=YOLO("runs/obb/train/weights/best.pt")
 
 
@@ -14,9 +16,10 @@ def get_centroid(contour):
     return None
 
 
-def process_slice(band,start_x,start_y,width,height,low,high,threshold_min,min_area):
+def process_slice(band,start_x,start_y,width,height,threshold_min,min_area):
     data=numpy.zeros((height,width))
     band.readPixels(start_x,start_y,width,height,data)
+    low,high=get_low_high(band)
     data=numpy.clip(data,low,high)
     img = cv2.normalize(data, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
     binary = cv2.threshold(img, threshold_min, 255, cv2.THRESH_BINARY)[1]
@@ -37,11 +40,10 @@ def process_slice(band,start_x,start_y,width,height,low,high,threshold_min,min_a
 
 
 
-def read_SAR_data(image_path,low,high,threshold_min,min_area):
-
+def read_SAR_data(image_path,threshold_min,min_area):
     multi_ship_group=0
     product = ProductIO.readProduct(image_path)
-    band=product.getBand("Sigma0_VV_ocean")
+    band=product.getBand("Gamma0_VV_ocean")
     w=band.getRasterWidth()
     h=band.getRasterHeight()
     geoCoding = product.getSceneGeoCoding()
@@ -53,32 +55,35 @@ def read_SAR_data(image_path,low,high,threshold_min,min_area):
         for x in range(0,w,slice_size):
             width=min(slice_size,w-x)
             height=min(slice_size,h-y)
-            new_centroids,new_contours=process_slice(band,x,y,width,height,low,high,threshold_min,min_area)
+            new_centroids,new_contours=process_slice(band,x,y,width,height,threshold_min,min_area)
             centroids.extend(new_centroids)
             contours.extend(new_contours)
 
     merged_contours = []
     skip = set()
+    points=numpy.array(centroids)
+    tree=cKDTree(points)
+
     for i,contour in enumerate(contours):
-        if i not in skip:
-            cx1,cy1=centroids[i]
-            same_dot=[contour]
-            for j,contour2 in enumerate(contours): #check for every dot to see if it is within dist pixels from eachother.
-                if not (j<=i or j in skip):
-                    cx2, cy2 = centroids[j]
-                    dist = numpy.hypot(cx1-cx2, cy1-cy2)
-                    if dist < 50: #merge threshold in pixels.
-                        same_dot.append(contour2)
-                        skip.add(j)
-            merged=numpy.vstack(same_dot) #must be a numpy array for cv.
-            merged_contours.append(merged)
-            
+        if i in skip:
+            continue
+        cluster_contours=[contour]
+        nearby_points=tree.query_ball_point(points[i],r=50)#get all points within 50 pixels of eachother.
+        
+        for j in nearby_points:
+            if j not in skip:
+                cluster_contours.append(contours[j])
+                skip.add(j)
+
+        merged=numpy.vstack(cluster_contours)
+        merged_contours.append(merged)
+        skip.add(i)
 
     location_of_ships=[]
     for c in merged_contours:
         min_enclosing_circle=cv2.minEnclosingCircle(c)
         (x, y) = min_enclosing_circle[0]
-        sep_ship_detections,multi_ship_group=check_contour_multiple_ships(band,x,y,300,geoCoding,low,high,multi_ship_group)
+        sep_ship_detections,multi_ship_group=check_contour_multiple_ships(band,x,y,300,geoCoding,multi_ship_group)
         if sep_ship_detections is not None:
             for ship_detection in sep_ship_detections:
                 already_exist=False
@@ -100,12 +105,14 @@ def read_SAR_data(image_path,low,high,threshold_min,min_area):
 
 
 
-
-    return location_of_ships
+    utc_time=product.getStartTime()
+    time=utc_time.toString()
+    dt = datetime.strptime(time, "%d-%b-%Y %H:%M:%S.%f")
     
+    return location_of_ships,dt
 
 
-def check_contour_multiple_ships(band,x,y,size,geoCoding,low,high,multi_ship_group):
+def check_contour_multiple_ships(band,x,y,size,geoCoding,multi_ship_group):
     if x<size:
         start_x=0
     else:
@@ -117,6 +124,7 @@ def check_contour_multiple_ships(band,x,y,size,geoCoding,low,high,multi_ship_gro
 
     data=numpy.zeros((size,size))
     band.readPixels(start_x,start_y,size,size,data)
+    low,high=get_low_high(band)
     data=numpy.clip(data,low,high)
     img=cv2.normalize(data, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
     img_3_channel=cv2.merge([img,img,img])
@@ -189,3 +197,11 @@ def shoelace(bbox):
 #pic.shape[1] (width) pic.shape[0](height)
 #contours = cv2.findContours(pic, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE) cv2.RETR_LIST for all, cv2.RETR_EXTERNAL for all cv2.RETR_TREE not needed, could also use CHAIN_APPROX_NONE
 #cv2.threshold(pic, min, max, cv2.THRESH_BINARY) anything below min or above max set to black, else set to white.
+
+def get_low_high(band):
+    stx = band.getStx()
+    mean=stx.getMean()
+    std=stx.getStandardDeviation()
+    low=max(stx.getMinimum(),mean-2.5*std)
+    high=mean+5*std
+    return low,high

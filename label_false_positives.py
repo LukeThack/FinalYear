@@ -1,4 +1,5 @@
 from detect_dark_ships import find_dark_ships
+from readSARdata import get_low_high
 from esa_snappy import ProductIO
 import numpy
 import cv2
@@ -10,31 +11,7 @@ import os
 from ultralytics import YOLO
 yolo_model=YOLO("runs/obb/train/weights/best.pt")
 
-found_dark_ships,_,_=find_dark_ships("2023-06-03 18:03:00","2023-06-03 18:10:00","20230603","mosaic_msk.dim",0.0001516640332, 0.04868127104362205,250,5)
-
-dark_ships=[]
-for ship in found_dark_ships:
-    dark_ships.append([ship.geo_centre[0],ship.geo_centre[1]])
-
-
-coastline=get_coastline_vectors("coastlines-split-4326/coastlines-split-4326/lines.shp")
-i=0
-new_dark_ships=[]
-for lat,lon in dark_ships[:]:
-
-    min_ship_long=math.floor(lon*100)/100 #position recorded wont be perfect
-    min_ship_lat=math.floor(lat*100)/100
-    lat_filter=coastline[(coastline["latitude"]>min_ship_lat-0.01)&(coastline["latitude"]<min_ship_lat+0.01)] #within 0.035, about 2.2km from a coastline, ignore result.
-    final_filter=lat_filter[(lat_filter["longitude"]>min_ship_long-0.01)&(lat_filter["longitude"]<min_ship_long+0.01)]
-
-    if len(final_filter)>0 or lat<50.4: #50.4 is minimum latitude for irish sea, remove if finding is close enough to land.
-        pass
-    else:
-        new_dark_ships.append(found_dark_ships[i])
-    i+=1
-
-
-def show_image(low,high,ship,band,file_name,size):
+def show_image(ship,band,file_name,size):
     x=int(ship.pixel_centre[0])
     y=int(ship.pixel_centre[1])
     if x<size:
@@ -47,6 +24,7 @@ def show_image(low,high,ship,band,file_name,size):
         start_y=int(y-size//2)
     data=numpy.zeros((size,size))
     band.readPixels(start_x,start_y,size,size,data)
+    low,high=get_low_high(band)
     data=numpy.clip(data,low,high)
     img=cv2.normalize(data, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
     img_3_channel=cv2.merge([img,img,img])
@@ -55,7 +33,6 @@ def show_image(low,high,ship,band,file_name,size):
     if len(results[0].obb)==0:
         return results,3,0
     else:
-        width,height=300,300
         for box in results[0].obb.xyxyxyxy:
 
             x1=int(box[0][0])
@@ -92,13 +69,13 @@ def show_image(low,high,ship,band,file_name,size):
 
 
 
-def label_ships(image_path,low,high,found_dark_ships,output_dir,max_image_id):
+def label_ships(image_path,found_dark_ships,output_dir,max_image_id):
     product = ProductIO.readProduct(image_path)
-    band=product.getBand("Sigma0_VH")
+    band=product.getBand("Gamma0_VV_ocean")
 
     for i,ship in enumerate(found_dark_ships):
         file_name="luke_ship_{}.jpg".format(i+max_image_id)
-        results,category,acceptable=show_image(low,high,ship,band,file_name,300)
+        results,category,acceptable=show_image(ship,band,file_name,300)
         if(len(results[0].obb)==0):
             print("No Ship detected by YOLO, skipping...")
             continue
@@ -130,5 +107,7 @@ def label_ships(image_path,low,high,found_dark_ships,output_dir,max_image_id):
                 output_file.write(output_line)
 
 
+found_dark_ships,_,_=find_dark_ships("202306","satelite/image3.dim",250,5)
 
-label_ships("mosaic_msk.dim",0.0001516640332, 0.04868127104362205,new_dark_ships,"SSDD_RBOX_IMAGES/dataset/labels/train/",1161)
+label_ships("satelite/image3.dim",found_dark_ships,"SSDD_RBOX_IMAGES/dataset/labels/train/",1500)
+
