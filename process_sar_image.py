@@ -1,10 +1,11 @@
 from esa_snappy import ProductIO, GPF,HashMap,jpy
+import os
 File = jpy.get_type("java.io.File")
 BandDescriptor = jpy.get_type("org.esa.snap.core.gpf.common.BandMathsOp$BandDescriptor")
 Integer = jpy.get_type('java.lang.Integer')
 
-input_file="satelite/S1A_IW_GRDH_1SDV_20230603T180703_20230603T180728_048825_05DF24_0616.zip"
-output_file="satelite/image3.dim"
+#input_file="satelite/S1A_IW_GRDH_1SDV_20230612T063111_20230612T063136_048949_05E2DC_F290.zip"
+#output_file="satelite/image11.dim"
 
 
 def process_SAR_image(input_file,output_file):
@@ -49,4 +50,30 @@ def process_SAR_image(input_file,output_file):
     masked_product=GPF.createProduct("BandMaths",bm_params,product_with_vector)
 
     ProductIO.writeProduct(masked_product,output_file,"BEAM-DIMAP")
-process_SAR_image(input_file,output_file)
+
+
+
+directory="satelite"
+all_files=os.listdir(directory)
+final_image_ids=[]
+for file in all_files:
+    if file.endswith(".dim"):
+        name=os.path.basename(file)
+        name_list=list(name)
+        num=""
+        for char in name_list:
+            if char.isdigit():
+                num+=char
+        final_image_id=int(num)+1
+        final_image_ids.append(final_image_id)
+final_image_id=max(final_image_ids) if final_image_ids else 0
+
+for file in all_files:
+    if file.endswith(".zip"):
+        input_file=os.path.join(directory,file)
+        output_file=os.path.join(directory,"image{}.dim".format(final_image_id))
+        process_SAR_image(input_file,output_file)
+        final_image_id+=1
+
+
+

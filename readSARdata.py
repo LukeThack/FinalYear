@@ -7,39 +7,6 @@ from datetime import datetime
 from scipy.spatial import cKDTree
 yolo_model=YOLO("runs/obb/train/weights/best.pt")
 
-
-
-def get_centroid(contour):
-    moments = cv2.moments(contour)  #dict of weighted pixel intensities
-    if moments["m00"] > 0:
-        return int(moments["m10"]/moments["m00"]), int(moments["m01"]/moments["m00"]) #credit geekforgeeks, returns average centre of mass of contours.
-    return None
-
-
-def process_slice(band,start_x,start_y,width,height,threshold_min,min_area):
-    data=numpy.zeros((height,width))
-    band.readPixels(start_x,start_y,width,height,data)
-    low,high=get_low_high(band)
-    data=numpy.clip(data,low,high)
-    img = cv2.normalize(data, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
-    binary = cv2.threshold(img, threshold_min, 255, cv2.THRESH_BINARY)[1]
-    pre_contours = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[0]
-    contours=[]
-    for c in pre_contours:
-        if cv2.contourArea(c) > min_area:
-            c[:,0,0]+=start_x
-            c[:,0,1]+=start_y
-            contours.append(c)
-
-    centroids=[]
-    for c in contours:
-        centroids.append(get_centroid(c))
-
-    return centroids,contours
-
-
-
-
 def read_SAR_data(image_path,threshold_min,min_area):
     multi_ship_group=0
     product = ProductIO.readProduct(image_path)
@@ -47,64 +14,37 @@ def read_SAR_data(image_path,threshold_min,min_area):
     w=band.getRasterWidth()
     h=band.getRasterHeight()
     geoCoding = product.getSceneGeoCoding()
-    centroids=[]
-    contours=[]
-    slice_size=1000
-
-    for y in range(0,h,slice_size):
-        for x in range(0,w,slice_size):
-            width=min(slice_size,w-x)
-            height=min(slice_size,h-y)
-            new_centroids,new_contours=process_slice(band,x,y,width,height,threshold_min,min_area)
-            centroids.extend(new_centroids)
-            contours.extend(new_contours)
-
-    merged_contours = []
-    skip = set()
-    points=numpy.array(centroids)
-    tree=cKDTree(points)
-
-    for i,contour in enumerate(contours):
-        if i in skip:
-            continue
-        cluster_contours=[contour]
-        nearby_points=tree.query_ball_point(points[i],r=50)#get all points within 50 pixels of eachother.
-        
-        for j in nearby_points:
-            if j not in skip:
-                cluster_contours.append(contours[j])
-                skip.add(j)
-
-        merged=numpy.vstack(cluster_contours)
-        merged_contours.append(merged)
-        skip.add(i)
+    #centroids=[]
+    #contours=[]
+    slice_size=640
+    overlap=128 #iterate over smaller slices to avoid missing ships on the border.
 
     location_of_ships=[]
-    for c in merged_contours:
-        min_enclosing_circle=cv2.minEnclosingCircle(c)
-        (x, y) = min_enclosing_circle[0]
-        sep_ship_detections,multi_ship_group=check_contour_multiple_ships(band,x,y,300,geoCoding,multi_ship_group)
-        if sep_ship_detections is not None:
-            for ship_detection in sep_ship_detections:
-                already_exist=False
-                mid_x=ship_detection.pixel_centre[0]
-                mid_y=ship_detection.pixel_centre[1]
 
-                for location in location_of_ships:
-                    dist=numpy.hypot(location.pixel_centre[0]-mid_x,location.pixel_centre[1]-mid_y)
-                    if dist<20: #if two detected ships are within 20 pixels of eachother, assume they are the same ship.
-                        already_exist=True
-                        if location.area<ship_detection.area: #if new detection has a larger bounding box, replace old one.
-                            location_of_ships.remove(location)
-                            location_of_ships.append(ship_detection)
-                        break
-                if not already_exist:
-                    location_of_ships.append(ship_detection)
+    for y in range(0,h,(slice_size-overlap)):
+        for x in range(0,w,(slice_size-overlap)):
+            width=min(slice_size,w-x)
+            height=min(slice_size,h-y)
+
+            sep_ship_detections,multi_ship_group=check_contour_multiple_ships(band,x,y,width,height,geoCoding,multi_ship_group)
+            if sep_ship_detections is not None:
+                for ship_detection in sep_ship_detections:
+                    already_exist=False
+                    mid_x=ship_detection.pixel_centre[0]
+                    mid_y=ship_detection.pixel_centre[1]
+
+                    for location in location_of_ships.copy():
+                        dist=numpy.hypot(location.pixel_centre[0]-mid_x,location.pixel_centre[1]-mid_y)
+                        if dist<20: #if two detected ships are within 20 pixels of eachother, assume they are the same ship.
+                            already_exist=True
+                            if location.area<ship_detection.area: #if new detection has a larger bounding box, replace old one.
+                                location_of_ships.remove(location)
+                                location_of_ships.append(ship_detection)
+                            break
+                    if not already_exist:
+                        location_of_ships.append(ship_detection)
+    
             
-
-
-
-
     utc_time=product.getStartTime()
     time=utc_time.toString()
     dt = datetime.strptime(time, "%d-%b-%Y %H:%M:%S.%f")
@@ -112,24 +52,19 @@ def read_SAR_data(image_path,threshold_min,min_area):
     return location_of_ships,dt
 
 
-def check_contour_multiple_ships(band,x,y,size,geoCoding,multi_ship_group):
-    if x<size:
-        start_x=0
-    else:
-        start_x=int(x-size//2)
-    if y<size:
-        start_y=0
-    else:
-        start_y=int(y-size//2)
-
-    data=numpy.zeros((size,size))
-    band.readPixels(start_x,start_y,size,size,data)
-    low,high=get_low_high(band)
-    data=numpy.clip(data,low,high)
-    img=cv2.normalize(data, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
+def check_contour_multiple_ships(band,x,y,width,height,geoCoding,multi_ship_group):
+    start_x=x
+    start_y=y
+    data=numpy.zeros((height,width))
+    band.readPixels(start_x,start_y,width,height,data)
+    data = numpy.log1p(data)
+    img = cv2.normalize(data, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
     img_3_channel=cv2.merge([img,img,img])
 
-    results=yolo_model(img_3_channel) #get bounding boxes from yolo model
+    conf_threshold=0.8
+
+    results=yolo_model(img_3_channel,conf=conf_threshold) #get bounding boxes from yolo model
+
 
     ship_detections=results[0].obb
     ship_locations=[]
@@ -138,6 +73,7 @@ def check_contour_multiple_ships(band,x,y,size,geoCoding,multi_ship_group):
             cls_id=int(box.cls.item())
         else:
             cls_id=int(box.cls)
+
         if cls_id==0:
             rotated_box=box.xyxyxyxy[0]
             x1=int(rotated_box[0][0])
@@ -197,11 +133,80 @@ def shoelace(bbox):
 #pic.shape[1] (width) pic.shape[0](height)
 #contours = cv2.findContours(pic, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE) cv2.RETR_LIST for all, cv2.RETR_EXTERNAL for all cv2.RETR_TREE not needed, could also use CHAIN_APPROX_NONE
 #cv2.threshold(pic, min, max, cv2.THRESH_BINARY) anything below min or above max set to black, else set to white.
-
+'''
 def get_low_high(band):
     stx = band.getStx()
     mean=stx.getMean()
     std=stx.getStandardDeviation()
-    low=max(stx.getMinimum(),mean-2.5*std)
-    high=mean+5*std
+    low=max(0,mean-std*2)
+    high=mean+std*2
     return low,high
+'''
+
+
+'''
+            new_centroids,new_contours=process_slice(band,x,y,width,height,threshold_min,min_area)
+            centroids.extend(new_centroids)
+            contours.extend(new_contours)
+
+    merged_contours = []
+    skip = set()
+    points=numpy.array(centroids)
+    tree=cKDTree(points)
+
+    for i,contour in enumerate(contours):
+        if i in skip:
+            continue
+        cluster_contours=[contour]
+        nearby_points=tree.query_ball_point(points[i],r=50)#get all points within 50 pixels of eachother.
+        
+        for j in nearby_points:
+            if j not in skip:
+                cluster_contours.append(contours[j])
+                skip.add(j)
+
+        merged=numpy.vstack(cluster_contours)
+        merged_contours.append(merged)
+        skip.add(i)
+
+
+    location_of_ships=[]
+    print(len(merged_contours))
+    for c in merged_contours:
+        min_enclosing_circle=cv2.minEnclosingCircle(c)
+        (x, y) = min_enclosing_circle[0]
+'''
+
+
+
+'''
+def get_centroid(contour):
+    moments = cv2.moments(contour)  #dict of weighted pixel intensities
+    if moments["m00"] > 0:
+        return int(moments["m10"]/moments["m00"]), int(moments["m01"]/moments["m00"]) #credit geekforgeeks, returns average centre of mass of contours.
+    return None
+
+
+def process_slice(band,start_x,start_y,width,height,threshold_min,min_area):
+    data=numpy.zeros((height,width))
+    band.readPixels(start_x,start_y,width,height,data)
+    data = numpy.log1p(data)
+    background = cv2.GaussianBlur(data, (31,31), 0)
+    enhanced = data - background
+    img = cv2.normalize(enhanced, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
+    img = cv2.medianBlur(img, 5)
+    binary = cv2.threshold(img, 0, 255,cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    pre_contours = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[0]
+    contours=[]
+    for c in pre_contours:
+        if cv2.contourArea(c) > min_area:
+            c[:,0,0]+=start_x
+            c[:,0,1]+=start_y
+            contours.append(c)
+
+    centroids=[]
+    for c in contours:
+        centroids.append(get_centroid(c))
+
+    return centroids,contours
+'''

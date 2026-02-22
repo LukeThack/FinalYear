@@ -1,21 +1,23 @@
+from turtle import width
+
+import cv2
+from matplotlib.pylab import size
 from readAIS import read_AIS_data
 from readSARdata import read_SAR_data
 import math
 from getting_ship_vectors import get_coastline_vectors
 import pandas as pd
-
+from trajectory import update_AIS_data
+from ultralytics import YOLO
+from esa_snappy import ProductIO, PixelPos, GeoPos
+import numpy
+yolo_model=YOLO("runs/obb/train/weights/best.pt")
 
 def find_dark_ships(ais_folder,sar_file,thresh_min,min_size):
 
-
     ship_locations,time=read_SAR_data(sar_file,thresh_min,min_size)
-    end=str(pd.to_datetime(time)+pd.to_timedelta("15min"))
-    start=str(pd.to_datetime(time)-pd.to_timedelta("15min"))
-
-    ais_data=read_AIS_data(ais_folder)
-
-    time_filter=ais_data[(ais_data["timestamp"]>=start) & (ais_data["timestamp"]<=end)]
-
+    
+    time_filter=update_AIS_data(time,ais_folder)
     ship_found=dict()
     dark_ships=[]
     multi_ships=dict()
@@ -26,8 +28,8 @@ def find_dark_ships(ais_folder,sar_file,thresh_min,min_size):
         lon=ship.geo_centre[1]
         min_ship_long=math.floor(lon*100)/100 #position recorded wont be perfect
         min_ship_lat=math.floor(lat*100)/100
-        lat_filter=time_filter[(time_filter["latitude"]>min_ship_lat)&(time_filter["latitude"]<min_ship_lat+0.02)] #+0.02 to allow for variance.
-        final_filter=lat_filter[(lat_filter["longitude"]>min_ship_long)&(lat_filter["longitude"]<min_ship_long+0.02)]["mmsi"].unique()
+        lat_filter=time_filter[(time_filter["latitude"]>min_ship_lat)&(time_filter["latitude"]<min_ship_lat+0.01)] #+0.02 to allow for variance.
+        final_filter=lat_filter[(lat_filter["longitude"]>min_ship_long)&(lat_filter["longitude"]<min_ship_long+0.01)]["mmsi"].unique()
 
         if len(final_filter)>0:
             current_dist=10000 #find closest ship
@@ -77,51 +79,37 @@ def find_dark_ships(ais_folder,sar_file,thresh_min,min_size):
 
 
     return dark_ships,ship_found,multi_ships
-'''
-found_dark_ships,ship_found,multi_ship=find_dark_ships("2023-06-03 18:03:00","2023-06-03 18:10:00","20230603","mosaic_msk.dim",0.0001516640332, 0.04868127104362205,250,5)
-print(len(ship_found))
-'''
-'''
-dark_ships=[]
-for key in multi_ship.keys():
-    group=multi_ship[key]
-    for ship in group[1:]:
-        dark_ships.append([ship[0][0].lat,ship[0][0].lon])
 
+'''
+found_dark_ships,found_confirmed_ships,multi_ships=find_dark_ships("202306","satelite/image3.dim",250,50)
+print(len(found_dark_ships),len(found_confirmed_ships),len(multi_ships))
 dark_ships=[]
+found_ships=[]
+
+for key in found_confirmed_ships.keys():
+    ship=found_confirmed_ships[key]
+    found_ships.append([ship.geo_centre[0],ship.geo_centre[1]])
+
+for key in multi_ships.keys():
+    for ship in multi_ships[key][1:]:
+        if ship[1] is not None:
+            found_ships.append([ship[0].geo_centre[0],ship[0].geo_centre[1]])
+        else:
+            dark_ships.append([ship[0].geo_centre[0],ship[0].geo_centre[1]])
+
 for ship in found_dark_ships:
-    dark_ships.append([ship[0].lat,ship[0].lon])
+    dark_ships.append([ship.geo_centre[0],ship.geo_centre[1]])
 
 
-df = pd.read_csv("ships_snap.txt", delim_whitespace=True)
-dark_ships = df[["lon", "lat"]].to_numpy()
-dark_ships = dark_ships.tolist()
 
-
-coastline=get_coastline_vectors("coastlines-split-4326/coastlines-split-4326/lines.shp")
-
-
-new_dark_ships=[]
-for lat,lon in dark_ships[:]:
-    min_ship_long=math.floor(lon*100)/100 #position recorded wont be perfect
-    min_ship_lat=math.floor(lat*100)/100
-    lat_filter=coastline[(coastline["latitude"]>min_ship_lat-0.01)&(coastline["latitude"]<min_ship_lat+0.01)] #within 0.035, about 2.2km from a coastline, ignore result.
-    final_filter=lat_filter[(lat_filter["longitude"]>min_ship_long-0.01)&(lat_filter["longitude"]<min_ship_long+0.01)]
-
-    if len(final_filter)>0 or lat<50.4: #50.4 is minimum latitude for irish sea, remove if finding is close enough to land.
-        pass
-    else:
-        new_dark_ships.append([lat,lon])
-
-print("updated dark ships")
-
-def write_ships_to_csv(ship_locations):
-    with open("ships_snap.txt", "w") as file:
+def write_ships_to_csv(ship_locations,filename):
+    with open(filename, "w") as file:
         file.write("lon\tlat\n")
         for lat, lon in ship_locations:
             file.write(f"{lon}\t{lat}\n")
 
 
 
-write_ships_to_csv(new_dark_ships)
+write_ships_to_csv(dark_ships,"ships_snap.txt")
+write_ships_to_csv(found_ships,"ships_snap2.txt")
 '''

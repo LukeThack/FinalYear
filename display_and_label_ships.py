@@ -1,42 +1,13 @@
 from detect_dark_ships import find_dark_ships
-from readSARdata import get_low_high
 from esa_snappy import ProductIO
 from readAIS import read_AIS_data
 import numpy
 import cv2
 import matplotlib.pyplot as plt
-from getting_ship_vectors import get_coastline_vectors
 import math
 from ultralytics import YOLO
 import os
 yolo_model=YOLO("runs/obb/train/weights/best.pt")
-
-dark_ships,found_confirmed_ships,multi_ships=find_dark_ships("202306","satelite/image3.dim",250,5)
-print(len(dark_ships),len(found_confirmed_ships),len(multi_ships))
-
-
-pos_confirmed_ship=[]
-for key in found_confirmed_ships.keys():
-    ship=found_confirmed_ships[key]
-    pos_confirmed_ship.append([ship.geo_centre[0],ship.geo_centre[1]])
-
-
-coastline=get_coastline_vectors("coastlines-split-4326/coastlines-split-4326/lines.shp")
-i=0
-confirmed_ships={}
-
-for lat,lon in pos_confirmed_ship[:]:
-    min_ship_long=math.floor(lon*100)/100 #position recorded wont be perfect
-    min_ship_lat=math.floor(lat*100)/100
-    lat_filter=coastline[(coastline["latitude"]>min_ship_lat-0.01)&(coastline["latitude"]<min_ship_lat+0.01)] #within 0.035, about 2.2km from a coastline, ignore result.
-    final_filter=lat_filter[(lat_filter["longitude"]>min_ship_long-0.01)&(lat_filter["longitude"]<min_ship_long+0.01)]
-
-    if len(final_filter)>0 or lat<50.4: #50.4 is minimum latitude for irish sea, remove if finding is close enough to land.
-        pass
-    else:
-        ship_key=list(found_confirmed_ships.keys())[i]
-        confirmed_ships[ship_key]=found_confirmed_ships[ship_key]
-    i+=1
 
 
 ship_type_dict={
@@ -75,8 +46,9 @@ def show_image(key,ship,band,file_name,ais_df):
     flat_array=numpy.zeros(width*height,dtype=numpy.float32) #has to be a flat array for read pixels of small values.
     band.readPixels(min_x, min_y, width, height, flat_array)
     data = flat_array.reshape((height, width))
-    low,high=get_low_high(band)
-    data=numpy.clip(data,low,high)
+    data=numpy.nan_to_num(data, nan=1e-6) #replace nans with small value. make normalise less aggressive.
+    data=numpy.log1p(data)
+    img=cv2.normalize(data, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
 
     points=numpy.array([[x1,y1],[x2,y2],[x3,y3],[x4,y4]],dtype=numpy.float32)
     points[:,0]-=min_x
@@ -109,15 +81,15 @@ def show_image(key,ship,band,file_name,ais_df):
     max_y_crop=min(h,int((h+rect_height)/2))
     rotated_image = rotated_image[min_y_crop:max_y_crop, min_x_crop:max_x_crop]
 
+    rotated_image=cv2.normalize(rotated_image, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
 
-    img=cv2.normalize(rotated_image, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
-    img_3_channel=cv2.merge([img,img,img])
-    data2=cv2.normalize(data, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
-    data3=cv2.merge([data2,data2,data2])
+    img_3_channel=cv2.merge([rotated_image,rotated_image,rotated_image])
+
+    data3=cv2.merge([img,img,img])
 
     _,axes=plt.subplots(1,2,figsize=(10,5))
     axes[0].imshow(img_3_channel, interpolation="nearest")
-    axes[0].set_title(display_ship_type)
+    axes[0].set_title(display_ship_type+" "+str(key))
     axes[0].axis('off')
     axes[1].imshow(data3, interpolation="nearest")
     axes[1].set_title("Second image")
@@ -157,6 +129,21 @@ def label_ships(image_path,confirmed_ships,output_dir,max_image_id,ais_folder):
         with open(output_file_path,"w") as output_file:
             output_file.write(str(category))
 
+directory="SHIP_CATEGORISATION_IMAGES/dataset/images/"
+all_files=os.listdir(directory)
+final_image_ids=[]
+for file in all_files:
+    name=os.path.basename(file)
+    name_list=list(name)
+    num=""
+    for char in name_list:
+        if char.isdigit():
+            num+=char
+    final_image_id=int(num)+1
+    final_image_ids.append(final_image_id)
+
+final_image_id=max(final_image_ids) if final_image_ids else 0
 
 
-label_ships("satelite/image3.dim",confirmed_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/",0,"202306")
+dark_ships,found_confirmed_ships,multi_ships=find_dark_ships("202306","satelite/image6.dim",250,50)
+label_ships("satelite/image6.dim",found_confirmed_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/",final_image_id,"202306")

@@ -4,7 +4,7 @@ import os
 
 
 def read_AIS_data(folder_path):
-    columns_to_read=[0,5,11,12,13,14]
+    columns_to_read=[0,5,11,12,13,14,15,16]
     file_list=[]
 
     for file_name in os.listdir(folder_path):
@@ -12,7 +12,7 @@ def read_AIS_data(folder_path):
         file_list.append(file)
 
     combined_file=pandas.concat(file_list,ignore_index=True)
-    combined_file.columns=["mmsi","ship_type","navigational_status","timestamp","latitude","longitude"]
+    combined_file.columns=["mmsi","ship_type","navigational_status","timestamp","latitude","longitude","speed","course"]
     combined_file.groupby("mmsi") #group by mmsi, data already in time order
 
     return combined_file
