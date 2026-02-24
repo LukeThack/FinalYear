@@ -1,48 +1,54 @@
-from turtle import width
-
 import cv2
-from matplotlib.pylab import size
-from readAIS import read_AIS_data
-from readSARdata import read_SAR_data
+from read_SAR_data import read_SAR_data,shoelace
 import math
-from getting_ship_vectors import get_coastline_vectors
-import pandas as pd
+import pandas
 from trajectory import update_AIS_data
 from ultralytics import YOLO
-from esa_snappy import ProductIO, PixelPos, GeoPos
+from esa_snappy import ProductIO
+from tensorflow import keras
+from tensorflow.keras.applications.resnet50 import preprocess_input
 import numpy
 yolo_model=YOLO("runs/obb/train/weights/best.pt")
+ship_model = keras.models.load_model("ship_classifier_final.keras")
+
 
 def find_dark_ships(ais_folder,sar_file,thresh_min,min_size):
-
     ship_locations,time=read_SAR_data(sar_file,thresh_min,min_size)
-    
     time_filter=update_AIS_data(time,ais_folder)
     ship_found=dict()
     dark_ships=[]
     multi_ships=dict()
+    product = ProductIO.readProduct(sar_file)
+    band=product.getBand("Gamma0_VV_ocean")
+    size=100
+    ships_found=[]
+    
+    for ship in ship_locations:
+        img_3_channel,start_x,start_y=get_ship_image(ship,band,size)
+        conf_threshold=0.7
+        results=yolo_model(img_3_channel,conf=conf_threshold) #get bounding boxes from yolo model
+        ship_detections=results[0].obb
+        largest_area,largest_bbox=find_largest_area(ship_detections,start_x,start_y)
 
-    for i in range(len(ship_locations)):
-        ship=ship_locations[i]
+        if ship_detections is not None and len(ship_detections)>0 and largest_area>0:
+            processed_image=pre_process_ship_image(ship,band)
+            prob_not_ship=ship_model.predict(processed_image)[0][0]
+            if (1-prob_not_ship)>0.5: #if most likely a ship
+                ship.rbbox=largest_bbox
+                ship.area=largest_area
+                ships_found.append(ship)
+
+    for ship in ships_found:
         lat=ship.geo_centre[0]
         lon=ship.geo_centre[1]
         min_ship_long=math.floor(lon*100)/100 #position recorded wont be perfect
         min_ship_lat=math.floor(lat*100)/100
-        lat_filter=time_filter[(time_filter["latitude"]>min_ship_lat)&(time_filter["latitude"]<min_ship_lat+0.01)] #+0.02 to allow for variance.
+        lat_filter=time_filter[(time_filter["latitude"]>min_ship_lat)&(time_filter["latitude"]<min_ship_lat+0.01)] #+0.01 to allow for non perfect trajectory tracking
         final_filter=lat_filter[(lat_filter["longitude"]>min_ship_long)&(lat_filter["longitude"]<min_ship_long+0.01)]["mmsi"].unique()
 
         if len(final_filter)>0:
-            current_dist=10000 #find closest ship
-            closest_mmsi=None
-            for mmsi in final_filter:
-                ais_ship=time_filter[time_filter["mmsi"]==mmsi]
-                discovered_lat = ais_ship.iloc[0]["latitude"]
-                discovered_lon = ais_ship.iloc[0]["longitude"]
-                dist=math.hypot(discovered_lat-lat,discovered_lon-lon)
-                if dist<current_dist:
-                    current_dist=dist
-                    closest_mmsi=mmsi
-
+            closest_mmsi=get_closest_mmsi(final_filter,time_filter,lat,lon) #df passed by reference.
+            
             if ship.multiship_group: #if multiple ships flag present
                 if ship.multiship_group not in multi_ships.keys():
                     multi_ships[ship.multiship_group]=[1,[ship,closest_mmsi]]
@@ -76,12 +82,162 @@ def find_dark_ships(ais_folder,sar_file,thresh_min,min_size):
             dark_ships.append(ship_data[1][0]) #if only one ship detected and not found in AIS, then dark ship list.
             del multi_ships[key]
 
-
-
     return dark_ships,ship_found,multi_ships
 
+
+def rotate_image(ship,data):
+    max_x,max_y,min_x,min_y=get_max_min_xy(ship)
+    height=max_y-min_y
+    width=max_x-min_x
+    x1,y1,x2,y2,x3,y3,x4,y4=ship.rbbox
+
+
+    points=numpy.array([[x1,y1],[x2,y2],[x3,y3],[x4,y4]],dtype=numpy.float32)
+    points[:,0]-=min_x
+    points[:,1]-=min_y
+    centre,(rect_width,rect_height),angle=cv2.minAreaRect(points)
+
+    if rect_height<rect_width: #rotate image to be vertical.
+        angle+=90
+        rect_width,rect_height=rect_height,rect_width
+
+    rotation_matrix=cv2.getRotationMatrix2D(centre,angle,1.0)
+
+    rad_angle=math.radians(angle)
+    sin=abs(math.sin(rad_angle))
+    cos=abs(math.cos(rad_angle))
+    new_width=int((height*sin)+(width*cos)) #need to be adjusted after rotation to prevent cut-off
+    new_height=int((height*cos)+(width*sin))
+
+    centre_offset_x=(new_width/2)-centre[0]
+    centre_offset_y=(new_height/2)-centre[1]
+    rotation_matrix[0,2]+=centre_offset_x #move image to centre of new canvas, 2x2 rotation, 2x1 translation to make 2x3 matrix.
+    rotation_matrix[1,2]+=centre_offset_y
+
+    rotated_image=cv2.warpAffine(data,rotation_matrix,(new_width, new_height))
+
+    h,w=rotated_image.shape[:2]
+    min_x_crop=max(0,int((w-rect_width)/2)) #avoid negatives
+    max_x_crop=min(w,int((w+rect_width)/2))
+    min_y_crop=max(0,int((h-rect_height)/2))
+    max_y_crop=min(h,int((h+rect_height)/2))
+    rotated_image = rotated_image[min_y_crop:max_y_crop, min_x_crop:max_x_crop]
+    return rotated_image
+
+def get_max_min_xy(ship):
+    bbox=ship.rbbox
+    x1,y1=bbox[0],bbox[1]
+    max_x=x1
+    min_x=x1
+    max_y=y1
+    min_y=y1
+
+    for i in range(0,len(bbox),2):
+        x=bbox[i]
+        y=bbox[i+1]
+        if x<min_x:
+            min_x=x
+        elif x>max_x:
+            max_x=x
+        if y<min_y:
+            min_y=y
+        elif y>max_y:
+            max_y=y
+    return max_x,max_y,min_x,min_y
+
+def get_ship_box_image(ship,band):
+    max_x,max_y,min_x,min_y=get_max_min_xy(ship)
+    height=max_y-min_y
+    width=max_x-min_x
+    flat_array=numpy.zeros(width*height,dtype=numpy.float32) #has to be a flat array for read pixels of small values.
+    band.readPixels(min_x, min_y, width, height, flat_array)
+    data = flat_array.reshape((height, width))
+    data=numpy.nan_to_num(data, nan=1e-6) #replace nans with small value. make normalise less aggressive.
+    data=numpy.log1p(data)
+    mean,std= numpy.mean(data),numpy.std(data)
+    high,low=mean+std,mean
+    data=numpy.clip(data,low,high)
+    img=cv2.normalize(data, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
+    rotated_image=rotate_image(ship,img)
+    img_3_channel=cv2.merge([rotated_image,rotated_image,rotated_image])
+    return img_3_channel
+
+def get_ship_image(ship,band,size=100):
+    x=int(ship.pixel_centre[0])
+    y=int(ship.pixel_centre[1])
+    if x<size:
+        start_x=0
+    else:
+        start_x=int(x-size//2)
+    if y<size:
+        start_y=0
+    else:
+        start_y=int(y-size//2)
+    data=numpy.zeros((size,size))
+    band.readPixels(start_x,start_y,size,size,data)
+    nan_replace=numpy.percentile(data,10)
+    data=numpy.nan_to_num(data, nan_replace) #replace nans with small value. make normalise less aggressive.
+    data=numpy.log1p(data)
+    mean,std= numpy.mean(data),numpy.std(data)
+    high,low=mean+std,mean
+    data=numpy.clip(data,low,high)
+    img=cv2.normalize(data, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
+    img_3_channel=cv2.merge([img,img,img])
+    return img_3_channel,start_x,start_y
+
+def find_largest_area(ship_detections,start_x,start_y):
+    largest_area=0
+    largest_bbox=None
+    for box in ship_detections:
+        if hasattr(box.cls,"item"):
+            cls_id=int(box.cls.item())
+        else:
+            cls_id=int(box.cls)
+
+        if cls_id==0:
+            rotated_box=box.xyxyxyxy[0]
+            x1=int(rotated_box[0][0])
+            y1=int(rotated_box[0][1])
+            x2=int(rotated_box[1][0])
+            y2=int(rotated_box[1][1])
+            x3=int(rotated_box[2][0])
+            y3=int(rotated_box[2][1])
+            x4=int(rotated_box[3][0])
+            y4=int(rotated_box[3][1])
+
+            bbox=[start_x+x1,start_y+y1,start_x+x2,start_y+y2,start_x+x3,start_y+y3,start_x+x4,start_y+y4]
+
+            ship_area=shoelace(bbox)
+            if ship_area>largest_area:
+                largest_bbox=bbox
+                largest_area=ship_area
+    return largest_area,largest_bbox
+
+def pre_process_ship_image(ship,band):
+    processed_image=get_ship_box_image(ship,band)
+    processed_image=cv2.cvtColor(processed_image, cv2.COLOR_BGR2RGB)
+    processed_image=cv2.resize(processed_image,(224,224))
+    processed_image=preprocess_input(processed_image)
+    processed_image=processed_image.astype(numpy.float32)
+    processed_image=numpy.expand_dims(processed_image, axis=0) 
+    return processed_image
+
+def get_closest_mmsi(final_filter,time_filter,lat,lon):
+    closest_mmsi=None
+    current_dist=10000
+    for mmsi in final_filter:
+        ais_ship=time_filter[time_filter["mmsi"]==mmsi]
+        discovered_lat = ais_ship.iloc[0]["latitude"]
+        discovered_lon = ais_ship.iloc[0]["longitude"]
+        dist=math.hypot(discovered_lat-lat,discovered_lon-lon)
+        if dist<current_dist:
+            current_dist=dist
+            closest_mmsi=mmsi
+    return closest_mmsi
+
+
 '''
-found_dark_ships,found_confirmed_ships,multi_ships=find_dark_ships("202306","satelite/image3.dim",250,50)
+found_dark_ships,found_confirmed_ships,multi_ships=find_dark_ships("202306","satelite/image12.dim",250,50)
 print(len(found_dark_ships),len(found_confirmed_ships),len(multi_ships))
 dark_ships=[]
 found_ships=[]

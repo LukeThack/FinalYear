@@ -1,4 +1,4 @@
-from readAIS import read_AIS_data
+from read_AIS_data import read_AIS_data
 import pandas as pd
 from pyproj import geod
 geod=geod.Geod(ellps="WGS84")

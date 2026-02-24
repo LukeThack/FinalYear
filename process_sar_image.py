@@ -53,27 +53,30 @@ def process_SAR_image(input_file,output_file):
 
 
 
-directory="satelite"
-all_files=os.listdir(directory)
-final_image_ids=[]
-for file in all_files:
-    if file.endswith(".dim"):
-        name=os.path.basename(file)
-        name_list=list(name)
-        num=""
-        for char in name_list:
-            if char.isdigit():
-                num+=char
-        final_image_id=int(num)+1
-        final_image_ids.append(final_image_id)
-final_image_id=max(final_image_ids) if final_image_ids else 0
-
-for file in all_files:
-    if file.endswith(".zip"):
-        input_file=os.path.join(directory,file)
-        output_file=os.path.join(directory,"image{}.dim".format(final_image_id))
-        process_SAR_image(input_file,output_file)
-        final_image_id+=1
+def process_directory(directory):
+    all_files=os.listdir(directory)
+    final_image_id=calc_max_id(all_files,".dim")
+    for file in all_files:
+        if file.endswith(".zip"):
+            input_file=os.path.join(directory,file)
+            output_file=os.path.join(directory,"image{}.dim".format(final_image_id))
+            process_SAR_image(input_file,output_file)
+            final_image_id+=1
 
 
 
+def calc_max_id(all_files,file_extension=""):
+    final_image_ids=[]
+    for file in all_files:
+        if file.endswith(file_extension):
+            name=os.path.basename(file)
+            name_list=list(name)
+            num=""
+            for char in name_list:
+                if char.isdigit():
+                    num+=char
+            final_image_id=int(num)+1
+            final_image_ids.append(final_image_id)
+
+    final_image_id=max(final_image_ids) if final_image_ids else 0
+    return final_image_id
