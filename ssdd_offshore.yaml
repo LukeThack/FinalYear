@@ -1,6 +1,7 @@
-path: SSDD_YOLO_IMAGES
+path: SSDD_RBOX_IMAGES
 train: dataset/images/train
 val: dataset/images/val
 nc: 1
-names: 
-  0: ship
+names:
+  0: Ship
+
