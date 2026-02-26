@@ -81,7 +81,7 @@ Parameters:
 
 def process_directory(directory):
     all_files = os.listdir(directory)
-    final_image_id = calc_max_id(all_files, ".dim")
+    final_image_id = next_id(all_files, ".dim")
     for file in all_files:
         if file.endswith(".zip"):
             input_file = os.path.join(directory, file)
@@ -103,7 +103,7 @@ Returns:
 '''
 
 
-def calc_max_id(all_files, file_extension=""):
+def next_id(all_files, file_extension=""):
     final_image_ids = []
     for file in all_files:
         if file.endswith(file_extension):

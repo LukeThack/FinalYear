@@ -1,4 +1,4 @@
-from read_AIS_data import read_AIS_data
+from dark_ship_project.read_AIS_data import read_AIS_data
 import pandas as pd
 from pyproj import geod
 geod = geod.Geod(ellps="WGS84")
@@ -14,18 +14,22 @@ Returns:
 
 
 def update_AIS_data(time, folder):
-    AIS_df = read_AIS_data(folder)
-    AIS_df['timestamp'] = pd.to_datetime(AIS_df['timestamp'])
+    try:
+        AIS_df = read_AIS_data(folder)
+        AIS_df['timestamp'] = pd.to_datetime(AIS_df['timestamp'])
 
-    time_filtered_df = AIS_df.set_index(
-        'timestamp')  # index for speed of search
+        time_filtered_df = AIS_df.set_index(
+            'timestamp')  # index for speed of search
 
-    result_rows = []
-    for mmsi, group in time_filtered_df.groupby('mmsi'):
-        result_rows.append(find_postion_mmsi_group(group, time))
+        result_rows = []
+        for mmsi, group in time_filtered_df.groupby('mmsi'):
+            result_rows.append(find_position_mmsi_group(group, time))
 
-    result = pd.DataFrame(result_rows)
-    return result
+        result = pd.DataFrame(result_rows)
+        return result
+    except ValueError:
+        print("Value error encountered, likely invalid file")
+        return pd.DataFrame(columns=["mmsi", "ship_type", "navigational_status","timestamp", "latitude", "longitude", "speed", "course"])
 
 
 '''
@@ -40,7 +44,7 @@ Returns:
 '''
 
 
-def find_postion_mmsi_group(mmsi_group_dataframe, time):
+def find_position_mmsi_group(mmsi_group_dataframe, time):
     mmsi_group_dataframe.sort_index(inplace=True)
     index = mmsi_group_dataframe.index.searchsorted(time)
 

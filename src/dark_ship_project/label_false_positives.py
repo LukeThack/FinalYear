@@ -1,11 +1,8 @@
-from detect_dark_ships import find_dark_ships
+from dark_ship_project.detect_dark_ships import find_dark_ships
 from esa_snappy import ProductIO
 import numpy
 import cv2
 import matplotlib.pyplot as plt
-import pandas as pd
-from getting_ship_vectors import get_coastline_vectors
-import math
 import os
 from ultralytics import YOLO
 yolo_model = YOLO("runs/obb/train/weights/best.pt")

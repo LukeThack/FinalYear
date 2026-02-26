@@ -1,8 +1,8 @@
 import cv2
-from read_SAR_data import read_SAR_data, shoelace
+from dark_ship_project.read_SAR_data import read_SAR_data, shoelace
 import math
 import pandas
-from trajectory import update_AIS_data
+from dark_ship_project.trajectory import update_AIS_data
 from ultralytics import YOLO
 from esa_snappy import ProductIO
 from tensorflow import keras
@@ -48,7 +48,7 @@ def find_dark_ships(ais_folder, sar_file):
         if ship_detections is not None and len(ship_detections) > 0 and largest_area > 0:
             processed_image = pre_process_ship_image(ship, band)
             prob_not_ship = ship_model.predict(processed_image)[0][0]
-            if (1-prob_not_ship) > 0.5:  # if most likely a ship
+            if (1-prob_not_ship) > 0.3:  # if most likely a ship
                 ship.rbbox = largest_bbox
                 ship.area = largest_area
                 ships_found.append(ship)

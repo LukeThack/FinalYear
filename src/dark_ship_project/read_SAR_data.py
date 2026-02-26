@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 from esa_snappy import ProductIO, PixelPos, GeoPos
 from ultralytics import YOLO
 from datetime import datetime
-from scipy.spatial import cKDTree
+import os
+import sys
 yolo_model = YOLO("runs/obb/train/weights/best.pt")
 
 
@@ -22,8 +23,16 @@ Returns:
 
 def read_SAR_data(image_path):
     multi_ship_group = 0
-    product = ProductIO.readProduct(image_path)
+    if not os.path.exists(image_path):
+        sys.exit(f"Error: File not found: {image_path}")
+    try:
+        product = ProductIO.readProduct(image_path)
+    except Exception as e:
+        sys.exit("Error: Product could not be read ",e)
+
     band = product.getBand("Gamma0_VV_ocean")
+    if band==None:
+        sys.exit("Gamma0_VV_ocean band not found in file")
     w = band.getRasterWidth()
     h = band.getRasterHeight()
     geoCoding = product.getSceneGeoCoding()
