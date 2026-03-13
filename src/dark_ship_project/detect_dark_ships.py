@@ -35,6 +35,7 @@ def find_dark_ships(ais_folder, sar_file):
     band = product.getBand("Gamma0_VV_ocean")
     size = 100
     ships_found = []
+    print(len(ship_locations))
 
     for ship in ship_locations:
         img_3_channel, start_x, start_y = get_ship_image(ship, band, size)
@@ -265,7 +266,6 @@ def get_ship_image(ship, band, size=100):
     nan_replace = numpy.percentile(data, 10)
     # replace nans with small value. make normalise less aggressive.
     data = numpy.nan_to_num(data, nan_replace)
-    data = numpy.log1p(data)
     mean, std = numpy.mean(data), numpy.std(data)
     high, low = mean+std, mean
     data = numpy.clip(data, low, high)  # remove extreme values

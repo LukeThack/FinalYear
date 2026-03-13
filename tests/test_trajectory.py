@@ -8,6 +8,7 @@ from dark_ship_project.read_AIS_data import read_AIS_data
 import random
 import math
 import numpy as np
+import matplotlib.pyplot as plt
 from pyproj import Geod
 geod = Geod(ellps="WGS84")
 
@@ -47,6 +48,7 @@ def test_trajectory_math():
     successful_attempts = 0
     
     for mmsi, group in open_water_ships.groupby('mmsi'):
+        group = group.sort_values("timestamp")
         if len(group) >= 3:
             # pick a random row in the middle of the group
             random_index = random.randint(1, len(group) - 2)
@@ -63,12 +65,12 @@ def test_trajectory_math():
                 continue
             total_attempts += 1
                 
-            combined_df = pandas.DataFrame([row_prev, row_next]).reset_index(drop=True)
-            
-            result = find_position_mmsi_group(combined_df, row_mid["timestamp"])
-            
-
-            
+            combined_df = pandas.DataFrame([row_prev, row_next])
+            combined_df["timestamp"] = pandas.to_datetime(combined_df["timestamp"])
+            combined_df = combined_df.set_index("timestamp")
+            curr_time = pandas.to_datetime(row_mid["timestamp"])
+            result = find_position_mmsi_group(combined_df, curr_time)
+        
             try:
                 _, _, dist = geod.inv(
                     float(row_mid["longitude"]),
@@ -80,11 +82,31 @@ def test_trajectory_math():
             except (ValueError, KeyError, TypeError) as e:
                 continue
             
-            if dist<1000:
-                successful_attempts += 1
+            if dist<300:
+                successful_attempts+=1
+                
+            '''
+            if dist>200:
+                plot_attempt(row_prev, row_next, row_mid, result, dist, lon_lat)
+                print(row_prev["course"],row_next["course"],row_prev["speed"],row_next["speed"],(next_time-past_time).total_seconds())
+            '''
 
-    assert((successful_attempts/total_attempts)>0.7)
+    assert((successful_attempts/total_attempts)>0.9)
 
+def plot_attempt(row_prev, row_next, row_mid, result, dist, trajectory):
+    plt.figure(figsize=(5,5))
+    plt.scatter(row_prev["longitude"], row_prev["latitude"], label="prev", marker="x")
+    plt.scatter(row_next["longitude"], row_next["latitude"], label="next", marker="x")
+    plt.scatter(row_mid["longitude"], row_mid["latitude"], label="actual mid", marker="o")
+    plt.scatter(result["longitude"], result["latitude"], label="predicted", marker="^")
 
+    if len(trajectory) > 1:
+        lons, lats = zip(*trajectory)
+        plt.plot(lons, lats, marker=".", linewidth=2, label="trajectory")
 
-
+    plt.legend()
+    plt.title(f"The error is {dist:.1f} m")
+    plt.xlabel("Longitude")
+    plt.ylabel("Latitude")
+    plt.show()
+    

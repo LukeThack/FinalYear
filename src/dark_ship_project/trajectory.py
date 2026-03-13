@@ -1,5 +1,6 @@
 from dark_ship_project.read_AIS_data import read_AIS_data
 import pandas as pd
+import numpy as np
 from pyproj import geod
 geod = geod.Geod(ellps="WGS84")
 '''
@@ -43,7 +44,6 @@ Returns:
 
 '''
 
-
 def find_position_mmsi_group(mmsi_group_dataframe, time):
     mmsi_group_dataframe.sort_index(inplace=True)
     index = mmsi_group_dataframe.index.searchsorted(time)
@@ -63,28 +63,55 @@ def find_position_mmsi_group(mmsi_group_dataframe, time):
         first_speed = float(first.get("speed", 0)) * \
             0.514444  # convert knots to m/s
         second_speed = float(second.get("speed", first_speed)) * 0.514444
+        speed_difference=second_speed-first_speed
 
-        left_course = float(first.get("course", 0))
-        second_course = float(second.get("course", left_course))
+        first_course = float(first.get("course", 0))
+        second_course = float(second.get("course", first_course))
+        course_difference = (second_course - first_course + 180) % 360 - 180 #finds shortest angle between courses
+        
 
         total_time = (second_time-first_time).total_seconds()
+        
+        time_from_first_ping=(time-first_time).total_seconds()
+        
 
-        # adjust for times since each AIS ping.
-        first_proportion = (time-first_time).total_seconds()/total_time
-        second_proportion = 1-first_proportion
+        if total_time<30:
+            speed_difference=0
 
-        reverse_course = (second_course+180) % 360
 
-        first_lon, first_lat, _ = geod.fwd(
-            first["longitude"], first["latitude"], left_course, first_speed*total_time*first_proportion)  # project on globe
-        second_lon, second_lat, _ = geod.fwd(second["longitude"], second["latitude"], (
-            reverse_course), (second_speed*total_time*second_proportion))
+        time_step_length=5
+        lon = first["longitude"]
+        lat = first["latitude"]
+        time_steps=int(time_from_first_ping//time_step_length)
+        remainder = total_time % time_step_length
 
-        angle, _, dist = geod.inv(first_lon, first_lat, second_lon, second_lat)
-        calc_lon, calc_lat, _ = geod.fwd(first_lon, first_lat, angle, dist)
+        #lon_lat=[[lon,lat]] add commented lines to return list of points
+
+        for time_step in range(time_steps):
+            current_time=(time_step+1)*time_step_length
+            current_speed = first_speed + (current_time/total_time) * speed_difference #accelerate by the average difference in speed
+            current_course= (first_course + (current_time/total_time) * course_difference)%360 #change course by the average difference in course
+            distance=current_speed*time_step_length
+            lon,lat,_=geod.fwd(lon,lat,current_course,distance)
+            #lon_lat.append([lon,lat])
+
+        if remainder > 0:
+            current_time = time_steps * time_step_length + remainder
+
+            current_speed = first_speed + (current_time / total_time) * speed_difference
+            current_course = (first_course + (current_time / total_time) * course_difference) % 360
+
+            distance = current_speed * remainder
+            lon, lat, _ = geod.fwd(lon, lat, current_course, distance)
+
+            #lon_lat.append([lon, lat])
 
         row = first.copy()
-        row["latitude"] = calc_lat
-        row["longitude"] = calc_lon
+        row["latitude"] = lat
+        row["longitude"] = lon
+    return row #, lon_lat
 
-    return row
+
+
+
+
