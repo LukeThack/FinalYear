@@ -1,9 +1,9 @@
-from dark_ship_project.detect_dark_ships import get_max_min_xy,get_ship_image,get_ship_box_image,get_closest_mmsi
+from dark_ship_project.detect_dark_ships import get_max_min_xy,get_ship_image,get_ship_box_image,get_closest_mmsi,find_dark_ships
 from dark_ship_project.read_SAR_data import Ship
 from dark_ship_project.read_SAR_data import shoelace
 from dark_ship_project.trajectory import update_AIS_data
 import tempfile
-import pandas
+import pandas as pd
 import os
 import numpy
 from datetime import datetime
@@ -87,9 +87,9 @@ def test_get_closest_mmsi_on_point():
     data2=[[2, 0, 0, 0, 0, "MSC", 0, 0, 0, 0, 0, "column", "2026-02-25 00:30:00", 20.0, 30.0, 40, 50]]
     file1=os.path.join(temp_dir.name,"data1.csv")
     file2=os.path.join(temp_dir.name,"data2.csv")
-    df=pandas.DataFrame(data1)
+    df=pd.DataFrame(data1)
     df.to_csv(file1,header=False,index=False)
-    df=pandas.DataFrame(data2)
+    df=pd.DataFrame(data2)
     df.to_csv(file2,header=False,index=False)
 
     dt = datetime.strptime("2026-02-25 00:00:00", "%Y-%m-%d %H:%M:%S")
@@ -106,9 +106,9 @@ def test_get_closest_mmsi():
     data2=[[2, 0, 0, 0, 0, "MSC", 0, 0, 0, 0, 0, "column", "2026-02-25 00:30:00", 20.0, 30.0, 40, 50]]
     file1=os.path.join(temp_dir.name,"data1.csv")
     file2=os.path.join(temp_dir.name,"data2.csv")
-    df=pandas.DataFrame(data1)
+    df=pd.DataFrame(data1)
     df.to_csv(file1,header=False,index=False)
-    df=pandas.DataFrame(data2)
+    df=pd.DataFrame(data2)
     df.to_csv(file2,header=False,index=False)
 
     dt = datetime.strptime("2026-02-25 00:00:00", "%Y-%m-%d %H:%M:%S")
@@ -125,9 +125,9 @@ def test_get_closest_mmsi_return_middle_of_points():
     data2=[[2, 0, 0, 0, 0, "MSC", 0, 0, 0, 0, 0, "column", "2026-02-25 00:30:00", 20.0, 30.0, 40, 50]]
     file1=os.path.join(temp_dir.name,"data1.csv")
     file2=os.path.join(temp_dir.name,"data2.csv")
-    df=pandas.DataFrame(data1)
+    df=pd.DataFrame(data1)
     df.to_csv(file1,header=False,index=False)
-    df=pandas.DataFrame(data2)
+    df=pd.DataFrame(data2)
     df.to_csv(file2,header=False,index=False)
 
     dt = datetime.strptime("2026-02-25 00:00:00", "%Y-%m-%d %H:%M:%S")
@@ -136,3 +136,114 @@ def test_get_closest_mmsi_return_middle_of_points():
     final_filter=[1,2]
     result=get_closest_mmsi(final_filter, time_filter,15,25)
     assert(result==1 or result==2)
+
+
+def test_dark_ship_detection(monkeypatch):
+
+    import pandas as pd
+    from datetime import datetime
+
+    # --- fake SAR ships ---
+    class FakeShip:
+        def __init__(self, lat, lon,multi_ship_group):
+            self.geo_centre = (lat, lon)
+            self.multiship_group = multi_ship_group
+            self.rbbox = None
+            self.area = None
+
+    fake_ships = [FakeShip(50.0, -1.0,None),FakeShip(50.0, -5.0,None),FakeShip(50.1, -7.1, 1),FakeShip(50.0, -7.0, 1)]
+    fake_time = datetime(2026, 1, 1)
+
+    def fake_read_SAR_data(*args):
+        return fake_ships, fake_time
+
+    fake_ais = pd.DataFrame({
+        "mmsi": [123456789],
+        "latitude": [50.0],
+        "longitude": [-1.0]
+    })
+    fake_ais2 = pd.DataFrame({
+        "mmsi": [987654321],
+        "latitude": [50.01],
+        "longitude": [-7.01]
+    })
+    fake_ais=pd.concat([fake_ais,fake_ais2])
+
+    def fake_update_AIS_data(*args):
+        return fake_ais
+    monkeypatch.setattr(
+        "dark_ship_project.detect_dark_ships.read_SAR_data",
+        fake_read_SAR_data
+    )
+
+    monkeypatch.setattr(
+        "dark_ship_project.detect_dark_ships.update_AIS_data",
+        fake_update_AIS_data
+    )
+
+    class FakeBand:
+        pass
+
+    class FakeProduct:
+        def getBand(self, *args):
+            return FakeBand()
+
+    class FakeProductIO:
+        def readProduct(product):
+            return FakeProduct()
+
+    monkeypatch.setattr(
+        "dark_ship_project.detect_dark_ships.ProductIO",
+        FakeProductIO
+    )
+
+    def fake_get_ship_image(*args):
+        return None, 0, 0
+
+    def fake_preprocess(*args):
+        return None
+
+    monkeypatch.setattr(
+        "dark_ship_project.detect_dark_ships.get_ship_image",
+        fake_get_ship_image
+    )
+
+    monkeypatch.setattr(
+        "dark_ship_project.detect_dark_ships.pre_process_ship_image",
+        fake_preprocess
+    )
+
+    # --- fake YOLO ---
+    class FakeYOLOOutput:
+        def __init__(self):
+            self.obb = [1]
+
+    def fake_yolo(*args, **kwargs):
+        return [FakeYOLOOutput()]
+
+    monkeypatch.setattr(
+        "dark_ship_project.detect_dark_ships.yolo_model",
+        fake_yolo
+    )
+
+    def fake_find_largest_area(*args):
+        return 400, [0,0,0,0]
+    monkeypatch.setattr(
+        "dark_ship_project.detect_dark_ships.find_largest_area",
+        fake_find_largest_area
+    )
+
+    class FakeModel:
+        def predict(self, *args):
+            return [[0.1]]
+
+    monkeypatch.setattr(
+        "dark_ship_project.detect_dark_ships.ship_model",
+        FakeModel()
+    )
+
+    dark_ships, found_ships, multi_ships = find_dark_ships("AIS", "SAR")
+
+    assert len(found_ships) == 1
+    assert len(dark_ships) == 1
+    assert len(multi_ships) == 1

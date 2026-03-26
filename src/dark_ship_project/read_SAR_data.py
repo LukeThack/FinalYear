@@ -21,7 +21,7 @@ Returns:
 '''
 
 
-def read_SAR_data(image_path):
+def read_SAR_data(image_path,YOLO1_conf_threshold):
     multi_ship_group = 0
     if not os.path.exists(image_path):
         sys.exit(f"Error: File not found: {image_path}")
@@ -50,7 +50,7 @@ def read_SAR_data(image_path):
             # get processed SAR image.
             img = process_full_sar_image(band, height, width, x, y)
             sep_ship_detections, multi_ship_group = check_for_ships(
-                img, x, y, geoCoding, multi_ship_group)  # get list of detections in image.
+                img, x, y, geoCoding, multi_ship_group,YOLO1_conf_threshold)  # get list of detections in image.
             if sep_ship_detections is not None:
                 for ship_detection in sep_ship_detections:
                     already_exist = False
@@ -93,10 +93,10 @@ Returns:
 '''
 
 
-def check_for_ships(img_3_channel, start_x, start_y, geoCoding, multi_ship_group):
-    conf_threshold = 0.8
+def check_for_ships(img_3_channel, start_x, start_y, geoCoding, multi_ship_group,YOLO1_conf_threshold):
+    
     # get bounding boxes from yolo model
-    results = yolo_model(img_3_channel, conf=conf_threshold)
+    results = yolo_model(img_3_channel, conf=YOLO1_conf_threshold)
     ship_detections = results[0].obb
     ship_locations = []
     for box in ship_detections:

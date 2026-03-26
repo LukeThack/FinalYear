@@ -44,11 +44,11 @@ def ships_full_rows_in_area_time(lat_target, lon_target, ais_folder, start_time,
 
 # Example usage
 if __name__ == "__main__":
-    target_lat = 55.585277
-    target_lon = -5.108056
+    target_lat = 53.013
+    target_lon = -5.736
     ais_folder = "202306"
-    start_time = "2023-06-12 00:00:00"
-    end_time = "2023-06-12 08:00:00"
+    start_time = "2023-06-15 18:00:00"
+    end_time = "2023-06-15 19:00:00"
 
     ships_in_area = ships_full_rows_in_area_time(
         target_lat, target_lon, ais_folder, start_time, end_time)

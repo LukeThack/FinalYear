@@ -48,7 +48,7 @@ def show_image(key, ship, band, file_name, ais_df):
     acceptable = int(acceptable)
 
     if acceptable:
-        cv2.imwrite("SHIP_CATEGORISATION_IMAGES/dataset2/images/" +
+        cv2.imwrite("SHIP_CATEGORISATION_IMAGES/dataset/images/" +
                     file_name, img_3_channel)
 
     return category, acceptable
@@ -93,8 +93,7 @@ def label_ships(image_path, confirmed_ships, output_dir, max_image_id, ais_folde
 
 
 #flag 0 for confirmed ships anything else for dark ships, 
-def label_ships_multiple_files(flag):
-    directory="satelite"
+def label_ships_multiple_files(flag,directory):
     all_files=os.listdir(directory)
     if flag==0:
         many_found_ships={}
@@ -106,20 +105,44 @@ def label_ships_multiple_files(flag):
 
         for key in many_found_ships.keys():
             found_ships=many_found_ships[key]
-            max_image_id=next_id(all_files)
-            label_ships(key,found_ships,"SHIP_CATEGORISATION_IMAGES/dataset2/labels/",max_image_id,"202306")
+            all_image_files=os.listdir('SHIP_CATEGORISATION_IMAGES/dataset/images')
+            max_image_id=next_id(all_image_files)
+            label_ships(key,found_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/",max_image_id,"202306")
 
     else:
-        many_found_ships=[]
+        many_dark_ships={}
+        many_found_ships={}
         for file in all_files:
             if file.endswith(".dim"):
                 file_name=os.path.join(directory,file)
                 dark_ships,found_confirmed_ships,multi_ships=find_dark_ships("202306",file_name)
-                many_found_ships.append(dark_ships)
-        label_ships('satelite/image12.dim', dark_ships,"SHIP_CATEGORISATION_IMAGES/dataset2/labels/", max_image_id, "202306")
+                many_dark_ships[file_name]=dark_ships
+                many_found_ships[file_name]=found_confirmed_ships
+
+        for key in many_found_ships.keys():
+            dark_ships=many_dark_ships[key]
+            found_ships=many_found_ships[key]
+
+            all_image_files=os.listdir('SHIP_CATEGORISATION_IMAGES/dataset/images')
+            max_image_id=next_id(all_image_files)
+            label_ships(key, dark_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/", max_image_id, "202306")
+
+            all_image_files=os.listdir('SHIP_CATEGORISATION_IMAGES/dataset/images')
+            max_image_id=next_id(all_image_files)
+            label_ships(key, found_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/", max_image_id, "202306")
 
 
 
 
-dark_ships, found_confirmed_ships, multi_ships = find_dark_ships("202306", 'satelite/image12.dim')
-label_ships('satelite/image12.dim', found_confirmed_ships,"SHIP_CATEGORISATION_IMAGES/dataset2/labels/", 0, "202306")
+dark_ships, found_confirmed_ships, multi_ships = find_dark_ships("202306", 'satelite/image12.dim',0.2,0.7,0.3,100)
+
+all_files=os.listdir('SHIP_CATEGORISATION_IMAGES/dataset/images')
+max_image_id=next_id(all_files)
+print(max_image_id)
+label_ships('satelite/image12.dim', dark_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/", max_image_id, "202306")
+
+all_files=os.listdir('SHIP_CATEGORISATION_IMAGES/dataset/images')
+max_image_id=next_id(all_files)
+print(max_image_id)
+label_ships('satelite/image12.dim', found_confirmed_ships,"SHIP_CATEGORISATION_IMAGES/dataset/labels/", max_image_id, "202306")
+#label_ships_multiple_files(5,"satelite")

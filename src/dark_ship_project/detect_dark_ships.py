@@ -8,6 +8,9 @@ from esa_snappy import ProductIO
 from tensorflow import keras
 from tensorflow.keras.applications.resnet50 import preprocess_input
 import numpy
+from pyproj import geod
+geod=geod.Geod(ellps="WGS84")
+
 yolo_model = YOLO("runs/obb/train/weights/best.pt")
 ship_model = keras.models.load_model("ship_classifier_final.keras")
 
@@ -25,8 +28,8 @@ Returns:
 '''
 
 
-def find_dark_ships(ais_folder, sar_file):
-    ship_locations, time = read_SAR_data(sar_file)
+def find_dark_ships(ais_folder, sar_file,YOLO1_conf_threshold=0.2,YOLO2_conf_threshold=0.7,classifier_conf_threshold=0.3,min_area=300):
+    ship_locations, time = read_SAR_data(sar_file,YOLO1_conf_threshold)
     time_filter = update_AIS_data(time, ais_folder)
     ship_found = dict()
     dark_ships = []
@@ -35,35 +38,34 @@ def find_dark_ships(ais_folder, sar_file):
     band = product.getBand("Gamma0_VV_ocean")
     size = 100
     ships_found = []
-    print(len(ship_locations))
 
     for ship in ship_locations:
         img_3_channel, start_x, start_y = get_ship_image(ship, band, size)
-        conf_threshold = 0.7
         # get bounding boxes from yolo model
-        results = yolo_model(img_3_channel, conf=conf_threshold)
+        results = yolo_model(img_3_channel, conf=YOLO2_conf_threshold)
         ship_detections = results[0].obb
         largest_area, largest_bbox = find_largest_area(
             ship_detections, start_x, start_y)
 
-        if ship_detections is not None and len(ship_detections) > 0 and largest_area > 0:
+        if ship_detections is not None and len(ship_detections) > 0 and largest_area > min_area:
             processed_image = pre_process_ship_image(ship, band)
-            prob_not_ship = ship_model.predict(processed_image)[0][0]
-            if (1-prob_not_ship) > 0.3:  # if most likely a ship
+            prob_not_ship = ship_model.predict(processed_image)[0][0] #0 for ship, 1 for not ship
+            if (1-prob_not_ship) > classifier_conf_threshold:  # if most likely a ship
                 ship.rbbox = largest_bbox
                 ship.area = largest_area
                 ships_found.append(ship)
 
     for ship in ships_found:
+        print(ship.area)
         lat = ship.geo_centre[0]
         lon = ship.geo_centre[1]
         # position recorded wont be perfect
-        min_ship_long = math.floor(lon*100)/100
-        min_ship_lat = math.floor(lat*100)/100
+        min_ship_long = lon-0.01
+        min_ship_lat = lat-0.01
         lat_filter = time_filter[(time_filter["latitude"] > min_ship_lat) & (
-            time_filter["latitude"] < min_ship_lat+0.01)]  # +0.01 to allow for non perfect trajectory tracking
+            time_filter["latitude"] < min_ship_lat+0.02)]  # +0.01 to allow for non perfect trajectory tracking
         final_filter = lat_filter[(lat_filter["longitude"] > min_ship_long) & (
-            lat_filter["longitude"] < min_ship_long+0.01)]["mmsi"].unique()
+            lat_filter["longitude"] < min_ship_long+0.02)]["mmsi"].unique()
 
         if len(final_filter) > 0:
             # df passed by reference.
@@ -78,9 +80,12 @@ def find_dark_ships(ais_folder, sar_file):
                     multi_ships[ship.multiship_group][0] += 1
                     multi_ships[ship.multiship_group].append(
                         [ship, closest_mmsi])
-            else:
+            elif closest_mmsi:
                 # if ship found at coords, then not a dark ship.
                 ship_found[int(closest_mmsi)] = ship
+            else:
+                dark_ships.append(ship) #if closest mmsi not within 500m then dark ship
+                continue
 
             # remove ship from further searches.
             time_filter = time_filter[time_filter["mmsi"] != closest_mmsi]
@@ -315,6 +320,7 @@ def find_largest_area(ship_detections, start_x, start_y):
             if ship_area > largest_area:
                 largest_bbox = bbox
                 largest_area = ship_area
+
     return largest_area, largest_bbox
 
 
@@ -361,29 +367,33 @@ def get_closest_mmsi(final_filter, time_filter, lat, lon):
         ais_ship = time_filter[time_filter["mmsi"] == mmsi]
         discovered_lat = ais_ship.iloc[0]["latitude"]
         discovered_lon = ais_ship.iloc[0]["longitude"]
-        dist = math.hypot(discovered_lat-lat, discovered_lon-lon)
+        _,_,dist=geod.inv(discovered_lon,discovered_lat,lon,lat)
         if dist < current_dist:
             current_dist = dist
             closest_mmsi = mmsi
-    return closest_mmsi
+    if current_dist<500:
+        return closest_mmsi
+    else:
+        return None
 
 
-'''
-found_dark_ships,found_confirmed_ships,multi_ships=find_dark_ships("202306","satelite/image12.dim",250,50)
-print(len(found_dark_ships),len(found_confirmed_ships),len(multi_ships))
+
+
+found_dark_ships, found_confirmed_ships, found_multi_ships = find_dark_ships("202306", 'satelite/image20.dim',0.2,0.7,0.5,100)
+print(len(found_dark_ships),len(found_confirmed_ships),len(found_multi_ships))
 dark_ships=[]
 found_ships=[]
+multi_ships=[]
+
 
 for key in found_confirmed_ships.keys():
     ship=found_confirmed_ships[key]
     found_ships.append([ship.geo_centre[0],ship.geo_centre[1]])
 
-for key in multi_ships.keys():
-    for ship in multi_ships[key][1:]:
-        if ship[1] is not None:
-            found_ships.append([ship[0].geo_centre[0],ship[0].geo_centre[1]])
-        else:
-            dark_ships.append([ship[0].geo_centre[0],ship[0].geo_centre[1]])
+for key in found_multi_ships.keys():
+    for ship,_ in found_multi_ships[key][1:]:
+        multi_ships.append([ship.geo_centre[0],ship.geo_centre[1]])
+
 
 for ship in found_dark_ships:
     dark_ships.append([ship.geo_centre[0],ship.geo_centre[1]])
@@ -398,6 +408,6 @@ def write_ships_to_csv(ship_locations,filename):
 
 
 
-write_ships_to_csv(dark_ships,"ships_snap.txt")
-write_ships_to_csv(found_ships,"ships_snap2.txt")
-'''
+#write_ships_to_csv(dark_ships,"dark_ships5.txt")
+#write_ships_to_csv(found_ships,"found_ships5.txt")
+#write_ships_to_csv(multi_ships,"multi_ships5.txt")

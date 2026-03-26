@@ -5,6 +5,7 @@ import cv2
 import glob
 import os
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score
 from tensorflow.keras.applications.resnet50 import preprocess_input
 from tensorflow.keras.applications import ResNet50
 
@@ -64,8 +65,39 @@ ship_model = model.fit(image_train, label_train, validation_data=(
     image_test, label_test), epochs=20, batch_size=16, callbacks=callbacks)
 
 model.save("ship_classifier_final.keras")
+image_directory = "SHIP_CATEGORISATION_IMAGES/eval/images/"
+label_directory = "SHIP_CATEGORISATION_IMAGES/eval/labels/"
+image_paths = glob.glob(image_directory+"*.jpg")
+
+images = []
+labels = []
+
+for image in image_paths:
+    img = cv2.imread(image)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, (224, 224))
+    img = preprocess_input(img)
+    img = img.astype(np.float32)
+
+    label_path = os.path.basename(image).replace("jpg", "txt")
+    with open(os.path.join(label_directory, label_path)) as label_file:
+        label = int(label_file.read().strip())
+        if label in [0, 1]:
+            labels.append(label)
+            images.append(img)
+
+images = np.array(images)
+labels = np.array(labels)
 
 loss, accuracy = model.evaluate(images, labels)
 
+
+# Get predicted probabilities
+pred_probs = model.predict(images)
+preds = (pred_probs > 0.5).astype(int)
+f1 = f1_score(labels, preds)
+
 print("Test Loss:", loss)
 print("Test Accuracy:", accuracy)
+print("Test F1 Score:", f1)
+

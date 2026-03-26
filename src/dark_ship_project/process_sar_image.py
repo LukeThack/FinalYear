@@ -5,8 +5,9 @@ BandDescriptor = jpy.get_type(
     "org.esa.snap.core.gpf.common.BandMathsOp$BandDescriptor")
 Integer = jpy.get_type('java.lang.Integer')
 
-# input_file="satelite/S1A_IW_GRDH_1SDV_20230612T063111_20230612T063136_048949_05E2DC_F290.zip"
-# output_file="satelite/image11.dim"
+#input_file="satelite/S1A_IW_GRDH_1SDV_20230612T063111_20230612T063136_048949_05E2DC_F290.zip"
+#output_file="satelite/image11.dim"
+
 
 '''
 Takes a sentinel 1 zip file and applys several filters and mask to the image then saves the result.
@@ -118,3 +119,5 @@ def next_id(all_files, file_extension=""):
 
     final_image_id = max(final_image_ids) if final_image_ids else 0
     return final_image_id
+
+#process_directory("satelite")
